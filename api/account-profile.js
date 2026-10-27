@@ -27,11 +27,13 @@ export default async function handler(req, res) {
         res.writeHead(result.created ? 201 : 200, headers);
         return res.end(JSON.stringify(result));
     } catch (error) {
-        console.error('[account-profile] Error:', error);
+        console.error('[account-profile] Error detallado:', error.message || error);
         const statusCode = error.statusCode || (error.code?.startsWith('auth/') ? 401 : 500);
         res.writeHead(statusCode, headers);
         return res.end(JSON.stringify({
-            error: statusCode === 500 ? 'No se pudo sincronizar el perfil interno.' : error.message,
+            error: process.env.NODE_ENV !== 'production' && statusCode === 500
+                ? (error.message || 'No se pudo sincronizar el perfil interno.')
+                : (statusCode === 500 ? 'No se pudo sincronizar el perfil interno.' : error.message),
         }));
     }
 }

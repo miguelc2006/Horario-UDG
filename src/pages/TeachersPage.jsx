@@ -70,9 +70,15 @@ export function TeachersPage() {
                 })
             });
 
-            if (!response.ok) throw new Error("Error en la consulta de oferta");
-            
-            const data = await response.json();
+            if (!response.ok) {
+                if (response.status === 404) {
+                    setProfessors([]);
+                    setStats({ count: 0 });
+                    return;
+                }
+                const errorPayload = await response.json().catch(() => ({}));
+                throw new Error(errorPayload.error || "Error en la consulta de oferta");
+            }
             
             // Extraer nombres únicos y normalizarlos
             const rawNames = [...new Set(data.map(item => item.profesor))];

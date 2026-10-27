@@ -16,7 +16,7 @@ const AUDIT_COLLECTION = 'account-audit-events';
  * @returns {string} HMAC-SHA256 hexadecimal.
  */
 export function hashAuditActor(uid) {
-    const secret = process.env.AUDIT_HASH_SECRET;
+    const secret = process.env.AUDIT_HASH_SECRET || (process.env.NODE_ENV !== 'production' ? (process.env.FIREBASE_PROJECT_ID || 'dev-audit-hash-secret-fallback') : null);
     if (!secret) throw new Error('AUDIT_HASH_SECRET no configurada');
     return crypto.createHmac('sha256', secret).update(uid).digest('hex');
 }
