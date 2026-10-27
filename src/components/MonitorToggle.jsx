@@ -72,9 +72,14 @@ const MonitorToggle = React.memo(({ nrc, materia, clave, profesor, cup, majrp, c
         // Si ya está monitoreando, desactivar
         if (monitoring) {
             setLoading(true);
-            const stopped = await stopMonitor(nrc, ciclo);
-            setLoading(false);
-            if (!stopped) showToast('No se pudo detener el monitoreo. Intenta de nuevo.', 'error');
+            try {
+                await stopMonitor(nrc, ciclo);
+                showToast('Monitoreo detenido', 'info');
+            } catch (err) {
+                showToast(err.message || 'No se pudo detener el monitoreo. Intenta de nuevo.', 'error');
+            } finally {
+                setLoading(false);
+            }
             return;
         }
 

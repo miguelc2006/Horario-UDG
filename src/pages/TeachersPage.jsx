@@ -80,6 +80,8 @@ export function TeachersPage() {
                 throw new Error(errorPayload.error || "Error en la consulta de oferta");
             }
             
+            const data = await response.json();
+
             // Extraer nombres únicos y normalizarlos
             const rawNames = [...new Set(data.map(item => item.profesor))];
             const normalizedList = rawNames

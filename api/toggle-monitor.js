@@ -1,25 +1,7 @@
 // api/toggle-monitor.js
 // Activa/desactiva de forma atómica el monitoreo de un NRC y ciclo.
-import admin from 'firebase-admin';
+import { getAdmin } from './_helpers/admin.js';
 import { isAuthorizedToken, sendRestrictedAccountResponse } from './_helpers/authorization.js';
-
-function getAdmin() {
-    if (admin.apps.length === 0) {
-        const raw = process.env.FIREBASE_ADMIN_CREDENTIALS;
-        if (!raw) throw new Error('FIREBASE_ADMIN_CREDENTIALS no configurada');
-        let credentials;
-        try {
-            credentials = JSON.parse(raw);
-        } catch {
-            credentials = JSON.parse(Buffer.from(raw, 'base64').toString('utf-8'));
-        }
-        admin.initializeApp({
-            credential: admin.credential.cert(credentials),
-            projectId: process.env.FIREBASE_PROJECT_ID || credentials.project_id,
-        });
-    }
-    return admin;
-}
 
 function corsHeaders() {
     return {
@@ -35,17 +17,45 @@ function sendJson(res, status, body) {
     return res.end(JSON.stringify(body));
 }
 
+/** Lee de forma segura el body o los query params del request */
+async function parseRequestBody(req) {
+    if (req.body && typeof req.body === 'object') return req.body;
+    if (typeof req.body === 'string' && req.body.trim()) {
+        try { return JSON.parse(req.body); } catch { /* ignore */ }
+    }
+    // Para DELETE o POST donde el body no fue pre-parseado
+    if (req.method === 'DELETE' || req.method === 'POST') {
+        try {
+            const chunks = [];
+            for await (const chunk of req) {
+                chunks.push(chunk);
+            }
+            if (chunks.length > 0) {
+                const raw = Buffer.concat(chunks).toString('utf-8');
+                return JSON.parse(raw);
+            }
+        } catch {
+            /* ignore stream read error */
+        }
+    }
+    return req.query || {};
+}
+
 /** Normaliza y valida identificadores usados como segmentos de documentos. */
-function normalizeIdentifier(value, label) {
+function normalizeIdentifier(value, label, required = true) {
     const normalized = String(value || '').trim();
-    if (!/^[A-Za-z0-9-]{1,40}$/.test(normalized)) {
+    if (!normalized) {
+        if (!required) return '';
+        throw new TypeError(`${label} requerido`);
+    }
+    if (!/^[A-Za-z0-9-_]{1,50}$/.test(normalized)) {
         throw new TypeError(`${label} inválido`);
     }
     return normalized;
 }
 
 function queueKey(nrc, ciclo) {
-    return `${nrc}_${ciclo}`;
+    return ciclo ? `${nrc}_${ciclo}` : String(nrc);
 }
 
 function normalizedScheduleIds(body) {
@@ -115,28 +125,35 @@ export default async function handler(req, res) {
             return sendJson(res, 405, { error: 'Método no permitido' });
         }
 
+        const parsedBody = await parseRequestBody(req);
+        const queryParams = req.query || {};
+
+        const nrcRaw = parsedBody.nrc || queryParams.nrc;
+        const cicloRaw = parsedBody.ciclo || parsedBody.ciclop || parsedBody.horarioLabel || queryParams.ciclo || queryParams.ciclop;
+
         let nrc;
         let ciclo;
         try {
-            nrc = normalizeIdentifier(req.body?.nrc, 'NRC');
-            ciclo = normalizeIdentifier(req.body?.ciclo, 'Ciclo');
+            nrc = normalizeIdentifier(nrcRaw, 'NRC', true);
+            ciclo = normalizeIdentifier(cicloRaw, 'Ciclo', req.method === 'POST');
         } catch (error) {
             return sendJson(res, 400, { error: error.message });
         }
 
         const uid = decodedToken.uid;
         const db = firebaseAdmin.firestore();
-        const courseRef = db.doc(`users/${uid}/monitored-courses/${queueKey(nrc, ciclo)}`);
-        const legacyCourseRef = db.doc(`users/${uid}/monitored-courses/${nrc}`);
-        const newQueueRef = db.doc(`monitoring-queue/${queueKey(nrc, ciclo)}`);
         const now = firebaseAdmin.firestore.FieldValue.serverTimestamp();
 
+        // -------------------------------------------------------------
+        // POST: Activar monitoreo
+        // -------------------------------------------------------------
         if (req.method === 'POST') {
-            const body = req.body || {};
-            const scheduleIds = normalizedScheduleIds(body);
+            const courseRef = db.doc(`users/${uid}/monitored-courses/${queueKey(nrc, ciclo)}`);
+            const legacyCourseRef = db.doc(`users/${uid}/monitored-courses/${nrc}`);
+            const newQueueRef = db.doc(`monitoring-queue/${queueKey(nrc, ciclo)}`);
+            const scheduleIds = normalizedScheduleIds(parsedBody);
 
             await db.runTransaction(async tx => {
-                // Firestore exige completar todas las lecturas antes de escribir.
                 const [courseSnapshot, legacySnapshot, newQueueSnapshot] = await Promise.all([
                     tx.get(courseRef),
                     tx.get(legacyCourseRef),
@@ -156,13 +173,13 @@ export default async function handler(req, res) {
                 tx.set(courseRef, {
                     nrc,
                     ciclo,
-                    materia: body.materia || '',
-                    clave: body.clave || '',
-                    profesor: body.profesor || '',
-                    horarioLabel: body.horarioLabel || '',
-                    cup: body.cup || '',
-                    majrp: body.majrp || '',
-                    registered: !!body.registered,
+                    materia: parsedBody.materia || '',
+                    clave: parsedBody.clave || '',
+                    profesor: parsedBody.profesor || '',
+                    horarioLabel: parsedBody.horarioLabel || '',
+                    cup: parsedBody.cup || '',
+                    majrp: parsedBody.majrp || '',
+                    registered: !!parsedBody.registered,
                     lastSeats: existingData?.lastSeats ?? -1,
                     lastSessions: existingData?.lastSessions || '',
                     scheduleIds,
@@ -176,51 +193,73 @@ export default async function handler(req, res) {
                 if (!courseSnapshot.exists) {
                     if (legacyQueueSnapshot) {
                         applyQueueDelta(tx, legacyQueueRef, legacyQueueSnapshot, -1, { nrc, ciclo }, now);
-                        applyQueueDelta(tx, newQueueRef, newQueueSnapshot, 1, { nrc, ciclo, cup: body.cup, majrp: body.majrp }, now);
+                        applyQueueDelta(tx, newQueueRef, newQueueSnapshot, 1, { nrc, ciclo, cup: parsedBody.cup, majrp: parsedBody.majrp }, now);
                     } else if (legacyQueueRef?.path === newQueueRef.path && legacySnapshot.exists) {
-                        // La suscripción antigua ya estaba contabilizada en la cola correcta.
-                        applyQueueDelta(tx, newQueueRef, newQueueSnapshot, newQueueSnapshot.exists ? 0 : 1, { nrc, ciclo, cup: body.cup, majrp: body.majrp }, now);
+                        applyQueueDelta(tx, newQueueRef, newQueueSnapshot, newQueueSnapshot.exists ? 0 : 1, { nrc, ciclo, cup: parsedBody.cup, majrp: parsedBody.majrp }, now);
                     } else {
-                        applyQueueDelta(tx, newQueueRef, newQueueSnapshot, 1, { nrc, ciclo, cup: body.cup, majrp: body.majrp }, now);
+                        applyQueueDelta(tx, newQueueRef, newQueueSnapshot, 1, { nrc, ciclo, cup: parsedBody.cup, majrp: parsedBody.majrp }, now);
                     }
                 } else if (!newQueueSnapshot.exists) {
-                    // Repara una cola faltante sin duplicar suscriptores existentes.
-                    applyQueueDelta(tx, newQueueRef, newQueueSnapshot, 1, { nrc, ciclo, cup: body.cup, majrp: body.majrp }, now);
+                    applyQueueDelta(tx, newQueueRef, newQueueSnapshot, 1, { nrc, ciclo, cup: parsedBody.cup, majrp: parsedBody.majrp }, now);
                 }
             });
 
             return sendJson(res, 200, { success: true, monitoring: true, nrc, ciclo });
         }
 
+        // -------------------------------------------------------------
+        // DELETE: Detener monitoreo
+        // -------------------------------------------------------------
         let removed = false;
         await db.runTransaction(async tx => {
-            const [courseSnapshot, legacySnapshot] = await Promise.all([
-                tx.get(courseRef),
-                tx.get(legacyCourseRef),
-            ]);
-            const storedSnapshot = courseSnapshot.exists ? courseSnapshot : legacySnapshot;
-            if (!storedSnapshot.exists) return;
+            const courseKey = ciclo ? queueKey(nrc, ciclo) : nrc;
+            const courseRef = db.doc(`users/${uid}/monitored-courses/${courseKey}`);
+            const legacyCourseRef = db.doc(`users/${uid}/monitored-courses/${nrc}`);
 
-            const storedData = storedSnapshot.data();
-            const storedCycle = String(storedData.ciclo || storedData.ciclop || storedData.horarioLabel || ciclo).trim();
-            const storedQueueRef = db.doc(`monitoring-queue/${queueKey(nrc, storedCycle)}`);
-            const storedQueueSnapshot = await tx.get(storedQueueRef);
+            // Obtener lecturas sin duplicar la misma referencia si coinciden
+            const refsToRead = [courseRef];
+            if (legacyCourseRef.path !== courseRef.path) {
+                refsToRead.push(legacyCourseRef);
+            }
 
-            tx.delete(storedSnapshot.ref);
-            applyQueueDelta(
-                tx,
-                storedQueueRef,
-                storedQueueSnapshot,
-                -1,
-                { nrc, ciclo: storedCycle },
-                now
-            );
+            const snapshots = await Promise.all(refsToRead.map(ref => tx.get(ref)));
+            const courseSnapshot = snapshots[0];
+            const legacySnapshot = snapshots[1] || { exists: false };
+
+            const targetSnapshot = courseSnapshot.exists ? courseSnapshot : (legacySnapshot.exists ? legacySnapshot : null);
+
+            if (!targetSnapshot) {
+                // El documento ya no existe, pero confirmamos el estado desactivado
+                return;
+            }
+
+            const storedData = targetSnapshot.data() || {};
+            const storedCycle = String(storedData.ciclo || storedData.ciclop || storedData.horarioLabel || ciclo || '').trim();
+            const queueDocKey = queueKey(nrc, storedCycle);
+            const storedQueueRef = queueDocKey ? db.doc(`monitoring-queue/${queueDocKey}`) : null;
+            const storedQueueSnapshot = storedQueueRef ? await tx.get(storedQueueRef) : null;
+
+            // Eliminar documento(s) del usuario
+            if (courseSnapshot.exists) tx.delete(courseRef);
+            if (legacySnapshot.exists && legacyCourseRef.path !== courseRef.path) tx.delete(legacyCourseRef);
+
+            // Decrementar cola global si corresponde
+            if (storedQueueRef && storedQueueSnapshot) {
+                applyQueueDelta(
+                    tx,
+                    storedQueueRef,
+                    storedQueueSnapshot,
+                    -1,
+                    { nrc, ciclo: storedCycle },
+                    now
+                );
+            }
             removed = true;
         });
 
         return sendJson(res, 200, { success: true, monitoring: false, removed, nrc, ciclo });
     } catch (error) {
-        console.error('[toggle-monitor] Error:', error.message);
-        return sendJson(res, 500, { error: 'Error al cambiar monitoreo' });
+        console.error('[toggle-monitor] Error:', error.message || error);
+        return sendJson(res, 500, { error: error.message || 'Error al cambiar monitoreo' });
     }
 }

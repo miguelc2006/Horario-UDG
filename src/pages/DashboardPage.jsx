@@ -297,11 +297,12 @@ export function DashboardPage() {
                                         className="notif-manage-monitored-remove"
                                         onClick={async (e) => {
                                             e.stopPropagation();
-                                            const stopped = await stopMonitor(mc.nrc, mc.ciclo || mc.ciclop);
-                                            if (stopped) {
+                                            try {
+                                                const targetCiclo = mc.ciclo || mc.ciclop || mc.horarioLabel || (mc.id?.includes('_') ? mc.id.split('_')[1] : '');
+                                                await stopMonitor(mc.nrc, targetCiclo);
                                                 showToast(`Monitoreo de ${mc.materia || mc.nrc} detenido`, 'info');
-                                            } else {
-                                                showToast('Error al detener monitoreo', 'error');
+                                            } catch (err) {
+                                                showToast(err.message || 'Error al detener monitoreo', 'error');
                                             }
                                         }}
                                         title="Detener monitoreo"

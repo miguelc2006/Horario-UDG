@@ -337,12 +337,12 @@ export function NotificationsPage() {
                                             onClick={async () => {
                                                 setStoppingNrc(mc.nrc);
                                                 try {
-                                                    const stopped = await stopMonitor(mc.nrc, mc.ciclo || mc.ciclop);
-                                                    if (!stopped) throw new Error('No se pudo detener el monitoreo');
+                                                    const targetCiclo = mc.ciclo || mc.ciclop || mc.horarioLabel || (mc.id?.includes('_') ? mc.id.split('_')[1] : '');
+                                                    await stopMonitor(mc.nrc, targetCiclo);
                                                     await refreshData();
                                                     showToast(`Monitoreo de ${mc.materia || mc.nrc} detenido`, 'info');
-                                                } catch {
-                                                    showToast('Error al detener monitoreo', 'error');
+                                                } catch (err) {
+                                                    showToast(err.message || 'Error al detener monitoreo', 'error');
                                                 } finally {
                                                     setStoppingNrc(null);
                                                 }

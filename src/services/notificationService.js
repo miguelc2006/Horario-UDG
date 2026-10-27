@@ -205,23 +205,31 @@ export async function stopMonitoring(nrc, ciclo) {
     const user = auth.currentUser;
     requireNotificationsAccess(user);
 
-    if (!nrc || !ciclo) {
-        throw new Error('El NRC y el ciclo son obligatorios para desactivar el monitoreo');
+    if (!nrc) {
+        throw new Error('El NRC es obligatorio para desactivar el monitoreo.');
     }
 
     const idToken = await user.getIdToken();
-    const res = await fetch('/api/toggle-monitor', {
+    const queryParams = new URLSearchParams({ nrc: String(nrc).trim() });
+    if (ciclo) {
+        queryParams.set('ciclo', String(ciclo).trim());
+    }
+
+    const res = await fetch(`/api/toggle-monitor?${queryParams.toString()}`, {
         method: 'DELETE',
         headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${idToken}`,
         },
-        body: JSON.stringify({ nrc, ciclo }),
+        body: JSON.stringify({
+            nrc: String(nrc).trim(),
+            ciclo: ciclo ? String(ciclo).trim() : '',
+        }),
     });
 
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Error al desactivar monitoreo');
+        throw new Error(err.error || `Error ${res.status}: no se pudo desactivar el monitoreo`);
     }
     return true;
 }

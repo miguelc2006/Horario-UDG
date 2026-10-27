@@ -272,8 +272,9 @@ export function NotificationsProvider({ children }) {
             setDataError(null);
             return true;
         } catch (error) {
+            console.error('[NotificationsContext] Error deteniendo monitoreo:', error);
             setDataError(error.message || 'No se pudo detener el monitoreo.');
-            return false;
+            throw error;
         }
     }, [user, canUseNotifications, refreshData]);
 
