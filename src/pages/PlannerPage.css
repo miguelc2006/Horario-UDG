@@ -1,23 +1,51 @@
-/* src/pages/PlannerPage.css */
-
 /* =========================================================
-   HEADER BAR
+   CONTAINER & TOPBAR DEL PLANIFICADOR (Igual a MySchedulesPage)
    ========================================================= */
 
-.planner-header-bar {
-    grid-column: 1 / -1;
-    padding: 0.85rem 1.5rem;
-    background: linear-gradient(135deg, rgba(var(--primary-color-rgb), 0.1) 0%, rgba(var(--primary-color-rgb), 0.05) 100%);
-    border-radius: 16px;
-    border: 1px solid var(--border-color);
-    text-align: center;
+.planner-page-container {
+    width: 100%;
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 1.5rem;
+    box-sizing: border-box;
 }
 
-.planner-page-title {
-    font-size: 1.2rem;
-    font-weight: 700;
+.editor-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1rem 1.25rem;
+    background: var(--bg-secondary-color);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+}
+
+.editor-title-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+}
+
+.editor-title {
     margin: 0;
+    font-size: 1.25rem;
+    font-weight: 700;
     color: var(--text-color);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.editor-actions-top {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-left: auto;
 }
 
 /* =========================================================
@@ -27,20 +55,24 @@
 .planner-layout {
     display: grid;
     grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
     gap: 1.5rem;
     width: 100%;
     max-width: 1600px;
     margin: 0 auto;
-    padding: 1rem;
+    padding: 0;
     box-sizing: border-box;
     align-items: start;
+}
+
+.editor-planner-layout {
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 0 !important;
 }
 
 @media (min-width: 1024px) {
     .planner-layout {
         grid-template-columns: 320px minmax(0, 1fr);
-        padding: 2rem;
         gap: 2rem;
     }
 
@@ -52,6 +84,14 @@
 }
 
 .layout-sidebar, .layout-content {
+    width: 100%;
+    min-width: 0;
+}
+
+.content-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
     width: 100%;
     min-width: 0;
 }
@@ -518,9 +558,22 @@
 }
 
 /* =========================================================
-   MÓVIL: Edge-to-edge + sin gaps entre secciones
+   MÓVIL: Edge-to-edge + sin gaps entre secciones (Igual a MySchedulesPage)
    ========================================================= */
 @media (max-width: 768px) {
+    .planner-page-container {
+        padding: 0;
+    }
+
+    .editor-topbar {
+        border-radius: 0;
+        border-left: none;
+        border-right: none;
+        border-top: none;
+        margin-bottom: 0.5rem;
+        padding: 0.75rem 1rem;
+    }
+
     .planner-layout {
         padding: 0;
         gap: 8px;
@@ -532,25 +585,6 @@
         border: none;
         padding: 12px 10px 8px;
         margin: 0;
-    }
-
-    /* Clase util: visible en móvil */
-    .mobile-only {
-        display: flex;
-    }
-
-    /* Barra de acciones: visible solo en móvil */
-    .schedule-actions-bar {
-        display: flex;
-        border-radius: 0;
-        border: none;
-        border-bottom: 1px solid var(--border-color);
-        padding: 8px 12px;
-    }
-
-    /* Cabecera desktop: oculta en móvil */
-    .desktop-only {
-        display: none !important;
     }
 
     /* Oferta académica: sin bordes redondeados */
@@ -566,15 +600,35 @@
         padding: 0 10px 10px;
     }
 
-    /* Horario: edge-to-edge */
+    /* Full-bleed: la tabla del horario evade el contenedor padre */
     .content-stack > .schedule-panel {
         padding: 0 !important;
         border-radius: 0 !important;
         border: none !important;
+        width: 100vw;
+        position: relative;
+        left: 50%;
+        right: 50%;
+        margin-left: -50vw;
+        margin-right: -50vw;
     }
     .content-stack > .schedule-panel .schedule-container {
         border-radius: 0;
         border: none;
         margin-top: 0;
+    }
+
+    /* Header del horario: ajuste visual en móvil */
+    .schedule-header {
+        padding: 8px 12px;
+        margin-bottom: 0;
+        border-bottom: 1px solid var(--border-color);
+    }
+    .schedule-header .panel-title {
+        font-size: 0.95rem;
+        margin-bottom: 0;
+    }
+    .schedule-header .schedule-title-group {
+        gap: 8px;
     }
 }

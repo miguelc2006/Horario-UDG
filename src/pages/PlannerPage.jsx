@@ -18,7 +18,7 @@ export function PlannerPage() {
         user, theme, saving, isResetModalOpen, setIsResetModalOpen, loading, error, resultsRef,
         materias, selectedNRCs, setSelectedNRCs, consultaRealizada, formParams, calendarioLabel,
         currentScheduleId, setCurrentScheduleId, currentScheduleName,
-        conflicts, isConflictModalOpen, setIsConflictModalOpen, resolveConflicts,
+        conflicts, isConflictModalOpen, resolveConflicts,
         isDirty, blocker,
         handleSaveCloud, handleDiscardNavigation, handleCancelNavigation, handleTriggerReset, handleConfirmReset,
         handleConsulta, handleRemoveNrc, clasesSeleccionadas,
@@ -30,134 +30,118 @@ export function PlannerPage() {
 
     // --- RENDER ---
     return (
-        <div className="planner-layout animate-fade-in">
-            <header className="planner-header-bar">
-                <h2 className="planner-page-title">Planificador de Horarios</h2>
-            </header>
-            
-            {/* Sidebar */}
-            <aside className="layout-sidebar">
-                <div className="card sticky-card">
-                    <h2 className="panel-title">Filtros de Búsqueda</h2>
-                    <ConsultaForm key={formResetKey} onConsultar={handleConsulta} loading={loading} initialParams={formParams} />
-                    {error && <div className="alert alert-error"><h4>Error</h4><p>{error}</p></div>}
-
-                    {nrcTarget && !consultaRealizada && (
-                        <div className="alert alert-info nrc-deep-link-banner">
-                            🔗 Notificación recibida: buscando NRC <strong>{nrcTarget}</strong>.
-                            Usa los filtros para consultar la oferta y la materia se preseleccionará.
-                        </div>
-                    )}
-
-                    {consultaRealizada && (
-                        <button className="btn-new-query" onClick={handleTriggerReset} title="Reiniciar">
-                            <span>🔄</span> Iniciar Nueva Consulta
-                        </button>
-                    )}
-                </div>
-            </aside>
-
-            {/* Barra de acciones - solo visible en móvil, entre sidebar y contenido */}
-            {selectedNRCs.length > 0 && (
-                <div className="schedule-actions-bar mobile-only animate-slide-up">
-                    <div className="schedule-title-group">
-                        <h2 className="panel-title schedule-mobile-title">Tu Horario</h2>
-                        {currentScheduleName && <span className="schedule-name-tag">{currentScheduleName}</span>}
+        <div className="planner-page-container animate-fade-in">
+            {/* Topbar unificada (idéntica a MySchedulesPage editor-topbar) */}
+            <div className="editor-topbar planner-topbar">
+                <div className="editor-title-group">
+                    <h2 className="editor-title">
+                        📅 {currentScheduleName || 'Planificador de Horarios'}
                         {isDirty && <span className="unsaved-badge" title="Cambios sin guardar">●</span>}
-                    </div>
-                    {user && (
-                        <div className="schedule-actions">
-                            {currentScheduleId && (
-                                <button
-                                    onClick={() => { setCurrentScheduleId(null); handleSaveCloud(); }}
-                                    className="secondary-button btn-small"
-                                    disabled={saving}
-                                >
-                                    Duplicar
-                                </button>
-                            )}
+                    </h2>
+                </div>
+                {user && (
+                    <div className="editor-actions-top">
+                        {currentScheduleId && (
+                            <button
+                                onClick={() => { setCurrentScheduleId(null); handleSaveCloud(); }}
+                                className="secondary-button btn-small"
+                                disabled={saving}
+                            >
+                                📋 Duplicar
+                            </button>
+                        )}
+                        {selectedNRCs.length > 0 && (
                             <button
                                 onClick={handleSaveCloud}
                                 disabled={saving}
-                                className="primary-button btn-small"
+                                className="primary-button btn-small btn-save-editor"
                             >
-                                {saving ? '...' : (currentScheduleId ? '💾 Actualizar' : '💾 Guardar')}
+                                {saving ? 'Guardando...' : (currentScheduleId ? '💾 Actualizar' : '💾 Guardar')}
                             </button>
-                        </div>
-                    )}
-                </div>
-            )}
-
-            {/* Content */}
-            <section className="layout-content" ref={resultsRef}>
-                {!consultaRealizada ? (
-                    <div className="empty-state">
-                        <svg className="empty-state-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" width="64" height="64">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
-                        </svg>
-                        <p className="empty-title">Planificador Académico</p>
-                        <p className="empty-subtitle">Configura los filtros para armar tu horario desde cero.</p>
-                        
-                        {!user && (
-                            <p className="login-prompt">
-                                <button className="login-link-btn" onClick={() => window.dispatchEvent(new CustomEvent('open-auth-modal'))}>
-                                    Inicia sesión
-                                </button>{' '}
-                                para guardar tus horarios.
-                            </p>
-                        )}
-                    </div>
-                ) : (
-                    <div className="content-stack">
-                        <div className="card panel">
-                            <div className="panel-header">
-                                <h2 className="panel-title">Oferta Académica</h2>
-                                <span className="section-tag">{materias.length} Resultados</span>
-                            </div>
-                            <SeleccionMaterias materias={materias} selectedNRCs={selectedNRCs} onSelectionChange={setSelectedNRCs} />
-                        </div>
-
-                        {selectedNRCs.length > 0 && (
-                            <div className="card panel schedule-panel animate-slide-up">
-                                {/* Cabecera con acciones - solo desktop */}
-                                <div className="panel-header schedule-header desktop-only">
-                                    <div className="schedule-title-group">
-                                        <h2 className="panel-title">Tu Horario</h2>
-                                        {currentScheduleName && <span className="schedule-name-tag">{currentScheduleName}</span>}
-                                        {isDirty && <span className="unsaved-badge" title="Cambios sin guardar">●</span>}
-                                    </div>
-                                    {user && (
-                                        <div className="schedule-actions">
-                                            {currentScheduleId && (
-                                                <button
-                                                    onClick={() => { setCurrentScheduleId(null); handleSaveCloud(); }}
-                                                    className="secondary-button btn-small"
-                                                    disabled={saving}
-                                                >
-                                                    Duplicar
-                                                </button>
-                                            )}
-                                            <button
-                                                onClick={handleSaveCloud}
-                                                disabled={saving}
-                                                className="primary-button btn-small"
-                                            >
-                                                {saving ? '...' : (currentScheduleId ? '💾 Actualizar' : '💾 Guardar')}
-                                            </button>
-                                        </div>
-                                    )}
-                                </div>
-                                <GenerarHorario
-                                    clasesSeleccionadas={clasesSeleccionadas}
-                                    calendarioLabel={calendarioLabel}
-                                    theme={theme}
-                                    onRemoveClase={handleRemoveNrc}
-                                />
-                            </div>
                         )}
                     </div>
                 )}
-            </section>
+            </div>
+
+            {/* Banner de deep link si viene desde notificación */}
+            {nrcTarget && !consultaRealizada && (
+                <div className="alert alert-info deep-link-banner" style={{ margin: '0 0 1.5rem', padding: '10px 16px', borderRadius: '8px', fontSize: '0.9rem' }}>
+                    🔗 Notificación recibida: buscando NRC <strong>{nrcTarget}</strong>.
+                    Usa los filtros para consultar la oferta y la materia se preseleccionará.
+                </div>
+            )}
+
+            <div className="planner-layout editor-planner-layout">
+                {/* Sidebar: Filtros */}
+                <aside className="layout-sidebar">
+                    <div className="card sticky-card">
+                        <h2 className="panel-title">Filtros de Búsqueda</h2>
+                        <ConsultaForm key={formResetKey} onConsultar={handleConsulta} loading={loading} initialParams={formParams} />
+                        {error && <div className="alert alert-error"><h4>Error</h4><p>{error}</p></div>}
+
+                        {consultaRealizada && (
+                            <button className="btn-new-query" onClick={handleTriggerReset} title="Reiniciar">
+                                <span>🔄</span> Iniciar Nueva Consulta
+                            </button>
+                        )}
+                    </div>
+                </aside>
+
+                {/* Content: Materias y Horario */}
+                <section className="layout-content" ref={resultsRef}>
+                    {!consultaRealizada ? (
+                        <div className="empty-state">
+                            <svg className="empty-state-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" width="64" height="64">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
+                            </svg>
+                            <p className="empty-title">Planificador Académico</p>
+                            <p className="empty-subtitle">Configura los filtros para armar tu horario desde cero.</p>
+                            
+                            {!user && (
+                                <p className="login-prompt">
+                                    <button className="login-link-btn" onClick={() => window.dispatchEvent(new CustomEvent('open-auth-modal'))}>
+                                        Inicia sesión
+                                    </button>{' '}
+                                    para guardar tus horarios.
+                                </p>
+                            )}
+                        </div>
+                    ) : (
+                        <div className="content-stack">
+                            <div className="card panel">
+                                <div className="panel-header">
+                                    <h2 className="panel-title">Oferta Académica</h2>
+                                    <span className="section-tag">{materias.length} Resultados</span>
+                                </div>
+                                <SeleccionMaterias
+                                    materias={materias}
+                                    selectedNRCs={selectedNRCs}
+                                    onSelectionChange={setSelectedNRCs}
+                                    ciclo={formParams?.calendario}
+                                />
+                            </div>
+
+                            {selectedNRCs.length > 0 && (
+                                <div className="card panel schedule-panel animate-slide-up">
+                                    <div className="panel-header schedule-header">
+                                        <div className="schedule-title-group">
+                                            <h2 className="panel-title">Tu Horario</h2>
+                                            {currentScheduleName && <span className="schedule-name-tag">{currentScheduleName}</span>}
+                                            {isDirty && <span className="unsaved-badge" title="Cambios sin guardar">●</span>}
+                                        </div>
+                                    </div>
+                                    <GenerarHorario
+                                        clasesSeleccionadas={clasesSeleccionadas}
+                                        calendarioLabel={calendarioLabel}
+                                        theme={theme}
+                                        onRemoveClase={handleRemoveNrc}
+                                    />
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </section>
+            </div>
 
             {/* Modal Reset */}
             {isResetModalOpen && createPortal(
