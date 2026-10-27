@@ -32,7 +32,7 @@ const AVAILABLE_TAGS = [
 ];
 
 const RatingForm = ({ professorId, professorName, onClose, onRatingEscaped, editingRating }) => {
-    const { user: currentUser } = useAuth();
+    const { user: currentUser, canManageRatings } = useAuth();
     const isEditing = !!editingRating;
     const contentRef = useRef(null);
     
@@ -73,6 +73,11 @@ const RatingForm = ({ professorId, professorName, onClose, onRatingEscaped, edit
 
         if (!currentUser) {
             setError("Debes iniciar sesión para calificar.");
+            setIsSubmitting(false);
+            return;
+        }
+        if (!canManageRatings) {
+            setError("Usa un correo @alumnos.udg.mx o @academicos.udg.mx para crear o editar evaluaciones.");
             setIsSubmitting(false);
             return;
         }

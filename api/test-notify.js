@@ -2,6 +2,7 @@
 // Endpoint de prueba para enviar notificaciones FCM manualmente
 // Solo accesible por el propio usuario autenticado
 import admin from 'firebase-admin';
+import { isAuthorizedToken, sendRestrictedAccountResponse } from './_helpers/authorization.js';
 
 function getAdmin() {
     if (admin.apps.length === 0) {
@@ -50,6 +51,9 @@ export default async function handler(req, res) {
         const idToken = authHeader.split('Bearer ')[1];
         const admin = getAdmin();
         const decodedToken = await admin.auth().verifyIdToken(idToken);
+        if (!isAuthorizedToken(decodedToken)) {
+            return sendRestrictedAccountResponse(res, corsHeaders());
+        }
         const uid = decodedToken.uid;
         const db = admin.firestore();
 

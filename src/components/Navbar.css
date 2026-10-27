@@ -238,6 +238,25 @@ body.dark-theme .btn-theme-toggle:hover {
     font-size: 1rem;
 }
 
+.btn-settings {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary-color);
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 50%;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+}
+
+.btn-settings:hover {
+    color: var(--primary-color);
+    background-color: var(--primary-color-light);
+}
+
 .btn-logout {
     background: transparent;
     border: none;

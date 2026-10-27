@@ -1,0 +1,335 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Identidad y capacidades. Se mantienen alineadas con profileAccess.js y
+    // api/_helpers/authorization.js; la verificación de correo no se exige aquí
+    // porque actualmente tampoco se exige en el backend.
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function owns(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function isStudent() {
+      return signedIn()
+        && request.auth.token.email is string
+        && request.auth.token.email.matches('.*@alumnos[.]udg[.]mx');
+    }
+
+    function isAcademic() {
+      return signedIn()
+        && request.auth.token.email is string
+        && request.auth.token.email.matches('.*@academicos[.]udg[.]mx');
+    }
+
+    function isInstitutional() {
+      return isStudent() || isAcademic();
+    }
+
+    function ownsStudentData(userId) {
+      return owns(userId) && isStudent();
+    }
+
+    function ownsInstitutionalData(userId) {
+      return owns(userId) && isInstitutional();
+    }
+
+    // --------------------------- Horarios ---------------------------
+    // Solo alumnos pueden persistir horarios cloud. El esquema se limita a
+    // los campos producidos actualmente por storageService.js.
+    function validSchedule(data) {
+      return data.keys().hasAll([
+          'materias',
+          'selectedNRCs',
+          'formParams',
+          'calendarioLabel',
+          'name',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'materias',
+          'selectedNRCs',
+          'formParams',
+          'calendarioLabel',
+          'name',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.materias is list
+        && data.materias.size() <= 100
+        && data.selectedNRCs is list
+        && data.selectedNRCs.size() <= 100
+        && data.formParams is map
+        && data.formParams.keys().hasOnly(['centro', 'carrera', 'calendario'])
+        && data.calendarioLabel is string
+        && data.calendarioLabel.size() <= 200
+        && data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 100
+        && data.updatedAt is string
+        && (!('createdAt' in data) || data.createdAt is string);
+    }
+
+    match /users/{userId}/schedules/{scheduleId} {
+      allow get, list: if ownsStudentData(userId);
+      allow create: if ownsStudentData(userId)
+        && validSchedule(request.resource.data)
+        && request.resource.data.keys().hasAll(['createdAt']);
+      allow update: if ownsStudentData(userId)
+        && validSchedule(request.resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'materias',
+          'selectedNRCs',
+          'formParams',
+          'calendarioLabel',
+          'name',
+          'updatedAt'
+        ]);
+      allow delete: if ownsStudentData(userId);
+    }
+
+    // ---------------- Monitoreo, alertas y tokens ------------------
+    // La creación/actualización de monitoreos y tokens, así como la creación
+    // de notificaciones, se hace únicamente con Firebase Admin. El cliente
+    // conserva lectura y borrado para uso normal y limpieza de cuenta.
+    match /users/{userId}/monitored-courses/{documentId} {
+      allow get, list, delete: if ownsInstitutionalData(userId);
+      allow create, update: if false;
+    }
+
+    match /users/{userId}/notifications/{documentId} {
+      allow get, list: if ownsInstitutionalData(userId);
+      allow create: if false;
+      allow update: if ownsInstitutionalData(userId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read'])
+        && request.resource.data.read is bool
+        && request.resource.data.read == true;
+      allow delete: if ownsInstitutionalData(userId);
+    }
+
+    match /users/{userId}/fcmTokens/{documentId} {
+      allow get, list, delete: if ownsInstitutionalData(userId);
+      allow create, update: if false;
+    }
+
+    function validNotificationPreferences(data) {
+      return data.keys().hasOnly([
+          'pushEnabled',
+          'seatAlerts',
+          'scheduleChanges',
+          'queryConsent',
+          'soundEnabled'
+        ])
+        && (!('pushEnabled' in data) || data.pushEnabled is bool)
+        && (!('seatAlerts' in data) || data.seatAlerts is bool)
+        && (!('scheduleChanges' in data) || data.scheduleChanges is bool)
+        && (!('queryConsent' in data) || data.queryConsent is bool)
+        && (!('soundEnabled' in data) || data.soundEnabled is bool);
+    }
+
+    match /users/{userId}/notificationPrefs/{documentId} {
+      allow get: if documentId == 'preferences'
+        && ownsInstitutionalData(userId);
+      allow list: if false;
+      allow create, update: if documentId == 'preferences'
+        && ownsInstitutionalData(userId)
+        && validNotificationPreferences(request.resource.data);
+      allow delete: if documentId == 'preferences'
+        && ownsInstitutionalData(userId);
+    }
+
+    // No existe un documento raíz de usuario ni otras subcolecciones públicas.
+    match /users/{userId} {
+      allow read, write: if false;
+    }
+
+    match /users/{userId}/{document=**} {
+      allow read, write: if false;
+    }
+
+    // --------------------- Caché de profesores ---------------------
+    // La consulta es pública. Las cuentas institucionales pueden refrescar
+    // la caché y mantener los tres acumuladores nativos usados por el cliente.
+    function validProfessorCache(data) {
+      return data.keys().hasOnly([
+          'name',
+          'mpId',
+          'ratingMP',
+          'difficultyMP',
+          'recommendationMP',
+          'numRatings',
+          'department',
+          'school',
+          'urlMP',
+          'comments',
+          'updatedAt',
+          'notFound',
+          'nativeRatingCount',
+          'nativeRatingSum',
+          'nativeDifficultySum'
+        ])
+        && data.keys().hasAll(['name', 'updatedAt'])
+        && data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 200
+        && data.updatedAt is timestamp
+        && (!('mpId' in data) || (data.mpId is string && data.mpId.size() <= 100))
+        && (!('ratingMP' in data)
+          || (data.ratingMP is number && data.ratingMP >= 0 && data.ratingMP <= 10))
+        && (!('difficultyMP' in data)
+          || (data.difficultyMP is number && data.difficultyMP >= 0 && data.difficultyMP <= 10))
+        && (!('recommendationMP' in data)
+          || (data.recommendationMP is string && data.recommendationMP.size() <= 100))
+        && (!('numRatings' in data)
+          || (data.numRatings is int && data.numRatings >= 0))
+        && (!('department' in data)
+          || (data.department is string && data.department.size() <= 300))
+        && (!('school' in data)
+          || (data.school is string && data.school.size() <= 300))
+        && (!('urlMP' in data)
+          || (data.urlMP is string && data.urlMP.size() <= 1000))
+        && (!('comments' in data)
+          || (data.comments is list && data.comments.size() <= 20))
+        && (!('notFound' in data) || data.notFound is bool)
+        && (!('nativeRatingCount' in data)
+          || (data.nativeRatingCount is int && data.nativeRatingCount >= 0))
+        && (!('nativeRatingSum' in data)
+          || (data.nativeRatingSum is number && data.nativeRatingSum >= 0))
+        && (!('nativeDifficultySum' in data)
+          || (data.nativeDifficultySum is number && data.nativeDifficultySum >= 0));
+    }
+
+    function updatesOnlyNativeRatingTotals() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'nativeRatingCount',
+          'nativeRatingSum',
+          'nativeDifficultySum'
+        ])
+        && request.resource.data.nativeRatingCount is int
+        && request.resource.data.nativeRatingSum is number
+        && request.resource.data.nativeDifficultySum is number
+        && request.resource.data.nativeRatingCount
+          == resource.data.get('nativeRatingCount', 0) + 1
+        && request.resource.data.nativeRatingSum
+          > resource.data.get('nativeRatingSum', 0)
+        && request.resource.data.nativeRatingSum
+          <= resource.data.get('nativeRatingSum', 0) + 10
+        && request.resource.data.nativeDifficultySum
+          > resource.data.get('nativeDifficultySum', 0)
+        && request.resource.data.nativeDifficultySum
+          <= resource.data.get('nativeDifficultySum', 0) + 10;
+    }
+
+    function updatesProfessorCache() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'name',
+          'mpId',
+          'ratingMP',
+          'difficultyMP',
+          'recommendationMP',
+          'numRatings',
+          'department',
+          'school',
+          'urlMP',
+          'comments',
+          'updatedAt',
+          'notFound'
+        ]);
+    }
+
+    match /professors/{professorId} {
+      allow get, list: if true;
+      allow create: if isInstitutional()
+        && validProfessorCache(request.resource.data);
+      allow update: if isInstitutional()
+        && validProfessorCache(request.resource.data)
+        && (updatesProfessorCache() || updatesOnlyNativeRatingTotals());
+      allow delete: if false;
+    }
+
+    // ------------------------- Evaluaciones ------------------------
+    function validRating(data) {
+      return data.keys().hasOnly([
+          'professorId',
+          'stars',
+          'difficulty',
+          'comment',
+          'tags',
+          'userId',
+          'userName',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasAll([
+          'professorId',
+          'stars',
+          'difficulty',
+          'comment',
+          'tags',
+          'userId',
+          'userName',
+          'createdAt'
+        ])
+        && data.professorId is string
+        && data.professorId.size() > 0
+        && data.professorId.size() <= 200
+        && data.stars is int
+        && data.stars >= 1
+        && data.stars <= 10
+        && data.difficulty is int
+        && data.difficulty >= 1
+        && data.difficulty <= 10
+        && data.comment is string
+        && data.comment.size() <= 300
+        && data.tags is list
+        && data.tags.size() <= 5
+        && data.userId is string
+        && data.userId == request.auth.uid
+        && data.userName is string
+        && data.userName.size() > 0
+        && data.userName.size() <= 100
+        && data.createdAt is timestamp
+        && (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    match /ratings/{ratingId} {
+      allow get, list: if true;
+      allow create: if isInstitutional()
+        && validRating(request.resource.data);
+      allow update: if isInstitutional()
+        && resource.data.userId == request.auth.uid
+        && validRating(request.resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'stars',
+          'difficulty',
+          'comment',
+          'tags',
+          'updatedAt'
+        ])
+        && request.resource.data.keys().hasAll(['updatedAt']);
+      allow delete: if isInstitutional()
+        && resource.data.userId == request.auth.uid;
+    }
+
+    // ------------------- Datos internos del servidor ----------------
+    // Firebase Admin no evalúa estas reglas; los clientes nunca deben acceder.
+    match /monitoring-queue/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /internal-account-profiles/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /account-audit-events/{document=**} {
+      allow read, write: if false;
+    }
+
+    // Denegación por defecto para cualquier colección no declarada.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -35,7 +35,7 @@ function getAdmin() {
  */
 export async function enviarFCM(uid, notification, data) {
     const admin = getAdmin();
-    const { db, collection, getDocs, doc } = await getFirestoreModules();
+    const { db, collection, getDocs, doc, deleteDoc } = await getFirestoreModules();
     
     const tokensRef = collection(db, 'users', uid, 'fcmTokens');
     const snapshot = await getDocs(tokensRef);

@@ -5,8 +5,6 @@ import { useAuth } from '../context/AuthContext';
 import { useNotifications } from '../hooks/useNotifications';
 import {
     initFCM,
-    requestFCMPermission,
-    registerFCMToken,
     getMonitoredCourses,
     getUserNotifications,
     markNotificationRead,
@@ -37,18 +35,28 @@ function Section({ title, defaultOpen = true, children }) {
 function StatusBadge({ ok, label }) {
     return (
         <span className={`test-badge ${ok ? 'ok' : 'no'}`}>
-            {ok ? '✅' : '❌'} {label}
+            {ok ? 'OK' : 'X'} {label}
         </span>
     );
 }
 
 export function NotificationTestPage() {
-    const { user } = useAuth();
-    const { unreadCount, monitoredCourses, notifications, fetchNotifications, requestPermission, permission } = useNotifications();
+    const { user, canUseNotifications } = useAuth();
+    const {
+        unreadCount,
+        fetchNotifications,
+        requestPermission,
+        permission,
+        fcmInitialized,
+        token,
+        deviceRegistered,
+        deviceRegistrationStatus,
+        deviceError,
+        startMonitor,
+        stopMonitor,
+    } = useNotifications();
 
-    // Estado local
-    const [fcmOk, setFcmOk] = useState(false);
-    const [fcmToken, setFcmToken] = useState(null);
+    // Estado local de las pruebas manuales, no de la sesión FCM compartida.
     const [localCourses, setLocalCourses] = useState([]);
     const [localNotifs, setLocalNotifs] = useState([]);
     const [sending, setSending] = useState(false);
@@ -65,6 +73,12 @@ export function NotificationTestPage() {
     // Cargar datos locales
     const loadData = useCallback(async () => {
         if (!user) return;
+        if (!canUseNotifications) {
+            setLocalCourses([]);
+            setLocalNotifs([]);
+            setLastFetch(null);
+            return;
+        }
         const [courses, notifs] = await Promise.all([
             getMonitoredCourses(user.uid),
             getUserNotifications(user.uid),
@@ -72,32 +86,41 @@ export function NotificationTestPage() {
         setLocalCourses(courses);
         setLocalNotifs(notifs);
         setLastFetch(new Date().toLocaleTimeString());
-    }, [user]);
+    }, [user, canUseNotifications]);
 
     useEffect(() => { loadData(); }, [loadData]);
 
     // Inicializar FCM manualmente
     const handleInitFCM = async () => {
+        if (!canUseNotifications) {
+            showToast('Las notificaciones requieren una cuenta institucional UDG.', 'warning');
+            return;
+        }
         const ok = await initFCM();
-        setFcmOk(ok);
         showToast(ok ? 'FCM inicializado correctamente' : 'Error al inicializar FCM', ok ? 'success' : 'error');
     };
 
-    // Solicitar permiso y registrar token
+    // Solicitar permiso y confirmar el registro mediante la fuente compartida.
     const handleRequestPermission = async () => {
-        const ok = await requestPermission();
-        if (ok) {
-            const token = await requestFCMPermission();
-            setFcmToken(token);
-            if (token) await registerFCMToken(token);
-            showToast(ok ? 'Permiso concedido y token registrado' : 'No se pudo obtener permiso', ok ? 'success' : 'warning');
+        if (!canUseNotifications) {
+            showToast('Las notificaciones requieren una cuenta institucional UDG.', 'warning');
+            return;
         }
+        const ok = await requestPermission();
+        showToast(
+            ok ? 'Permiso concedido y dispositivo registrado' : (deviceError || 'No se pudo activar el dispositivo'),
+            ok ? 'success' : 'warning'
+        );
     };
 
     // Enviar notificación de prueba
     const handleSendTest = async () => {
         if (!user) {
             showToast('Debes iniciar sesión', 'warning');
+            return;
+        }
+        if (!canUseNotifications) {
+            showToast('Las notificaciones requieren una cuenta institucional UDG.', 'warning');
             return;
         }
         setSending(true);
@@ -134,6 +157,10 @@ export function NotificationTestPage() {
             showToast('Debes iniciar sesión', 'warning');
             return;
         }
+        if (!canUseNotifications) {
+            showToast('Las notificaciones requieren una cuenta institucional UDG.', 'warning');
+            return;
+        }
         const nrc = course.nrc || '00000';
         const materia = course.materia || 'Materia';
 
@@ -144,11 +171,11 @@ export function NotificationTestPage() {
                 body = `${materia} — NRC ${nrc} tiene lugar(es) disponible(s).`;
                 break;
             case 'schedule_change':
-                title = `⚠️ Cambio de horario`;
+                title = `Aviso: Cambio de horario`;
                 body = `${materia} — NRC ${nrc} ha modificado su horario o profesor.`;
                 break;
             case 'professor_change':
-                title = `👨‍🏫 Cambio de profesor`;
+                title = `Profesor: Cambio de profesor`;
                 body = `${materia} — NRC ${nrc} tiene un cambio de profesor asignado.`;
                 break;
             default:
@@ -165,7 +192,9 @@ export function NotificationTestPage() {
                 const schedules = await getUserSchedules(user.uid);
                 const match = schedules.find(s => s.selectedNRCs?.includes(Number(nrc)));
                 if (match) scheduleId = match.id;
-            } catch (e) { /* silencioso */ }
+            } catch {
+                // La prueba puede continuar sin vincularse a un horario.
+            }
 
             const res = await fetch('/api/test-notify', {
                 method: 'POST',
@@ -189,18 +218,23 @@ export function NotificationTestPage() {
 
     // Monitor rápido
     const handleQuickMonitor = async () => {
+        if (!canUseNotifications) {
+            showToast('El monitoreo requiere una cuenta institucional UDG.', 'warning');
+            return;
+        }
         if (!quickNrc || !quickMateria) {
             showToast('Ingresa NRC y materia', 'warning');
             return;
         }
         try {
-            const { startMonitoring } = await import('../services/notificationService');
-            await startMonitoring({
+            const started = await startMonitor({
                 nrc: quickNrc,
                 materia: quickMateria,
+                ciclo: quickCiclop,
                 horarioLabel: quickCiclop,
                 registered: false,
             });
+            if (!started) throw new Error('No se pudo activar el monitoreo');
             showToast(`Monitoreo activado para NRC ${quickNrc}`, 'success');
             loadData();
         } catch (err) {
@@ -209,10 +243,14 @@ export function NotificationTestPage() {
     };
 
     // Detener monitoreo
-    const handleStopMonitor = async (nrc, horarioLabel) => {
+    const handleStopMonitor = async (nrc, ciclo) => {
+        if (!canUseNotifications) {
+            showToast('El monitoreo requiere una cuenta institucional UDG.', 'warning');
+            return;
+        }
         try {
-            const { stopMonitoring } = await import('../services/notificationService');
-            await stopMonitoring(nrc, horarioLabel);
+            const stopped = await stopMonitor(nrc, ciclo);
+            if (!stopped) throw new Error('No se pudo detener el monitoreo');
             showToast(`Monitoreo detenido para NRC ${nrc}`, 'info');
             loadData();
         } catch (err) {
@@ -222,7 +260,7 @@ export function NotificationTestPage() {
 
     // Marcar notificación como leída
     const handleMarkRead = async (notifId) => {
-        if (!user) return;
+        if (!user || !canUseNotifications) return;
         await markNotificationRead(user.uid, notifId);
         loadData();
         if (typeof fetchNotifications === 'function') fetchNotifications();
@@ -264,22 +302,24 @@ export function NotificationTestPage() {
                 {/* Estado FCM */}
                 <Section title="📡 Estado de FCM">
                     <div className="test-grid">
-                        <div><StatusBadge ok={fcmOk} label="FCM Init" /></div>
-                        <div><StatusBadge ok={permission === 'granted'} label={`Permiso: ${permission || 'no solicitado'}`} /></div>
-                        <div><StatusBadge ok={!!fcmToken} label="Token registrado" /></div>
+                        <div><StatusBadge ok={fcmInitialized} label="FCM Init" /></div>
+                        <div><StatusBadge ok={permission === 'granted'} label={`Permiso: ${permission || 'no soportado'}`} /></div>
+                        <div><StatusBadge ok={!!token} label="Token recuperado" /></div>
+                        <div><StatusBadge ok={deviceRegistered} label={`Backend: ${deviceRegistrationStatus}`} /></div>
                         <div><StatusBadge ok={unreadCount > 0} label={`${unreadCount} no leídas`} /></div>
                     </div>
-                    {fcmToken && (
+                    {token && (
                         <div className="test-token-box">
                             <strong>Token:</strong>
-                            <code>{fcmToken.substring(0, 50)}…</code>
+                            <code>{token.substring(0, 50)}…</code>
                         </div>
                     )}
+                    {deviceError && <div className="test-token-box">Error: {deviceError}</div>}
                     {lastFetch && <div className="test-token-box">Última carga: {lastFetch}</div>}
                     <div className="test-btn-row">
                         <button className="test-btn" onClick={handleInitFCM} type="button">🔧 Iniciar FCM</button>
                         <button className="test-btn" onClick={handleRequestPermission} type="button">🔔 Solicitar permiso</button>
-                        {!fcmOk && <span className="test-hint">Usa "Iniciar FCM" primero si no se inicializó solo</span>}
+                        {!fcmInitialized && <span className="test-hint">Usa "Iniciar FCM" primero si no se inicializó solo</span>}
                     </div>
                 </Section>
 
@@ -310,7 +350,7 @@ export function NotificationTestPage() {
                             disabled={sending}
                             type="button"
                         >
-                            {sending ? '⏳ Enviando…' : '🚀 Enviar notificación push'}
+                            {sending ? 'Enviando...' : 'Enviar notificación push'}
                         </button>
                     </div>
                     {testResult && (
@@ -321,7 +361,7 @@ export function NotificationTestPage() {
                 </Section>
 
                 {/* Monitoreo rápido */}
-                <Section title="🔍 Monitoreo rápido (NRC manual)">
+                <Section title="Monitoreo rápido (NRC manual)">
                     <div className="test-form test-form-inline">
                         <div className="test-field">
                             <label>NRC</label>
@@ -370,7 +410,7 @@ export function NotificationTestPage() {
                                     </div>
                                     <button
                                         className="test-btn test-btn-danger test-btn-sm"
-                                        onClick={() => handleStopMonitor(c.nrc, c.horarioLabel)}
+                                        onClick={() => handleStopMonitor(c.nrc, c.ciclo || c.ciclop)}
                                         type="button"
                                     >
                                         ✕ Detener
@@ -411,7 +451,7 @@ export function NotificationTestPage() {
                                             type="button"
                                             title="Simular cambio de horario"
                                         >
-                                            ⚠️ Horario
+                                            Aviso: Horario
                                         </button>
                                         <button
                                             className="test-btn test-btn-sm test-btn-purple"
@@ -419,7 +459,7 @@ export function NotificationTestPage() {
                                             type="button"
                                             title="Simular cambio de profesor"
                                         >
-                                            👨‍🏫 Profesor
+                                            Profesor
                                         </button>
                                     </div>
                                 </div>
@@ -480,10 +520,10 @@ export function NotificationTestPage() {
                         </button>
                         <button
                             className="test-btn"
-                            onClick={() => { setTestTitle('⚠️ Cambio de horario'); setTestBody('Física II — NRC 67890 ha modificado su horario o profesor.'); }}
+                            onClick={() => { setTestTitle('Aviso: Cambio de horario'); setTestBody('Física II — NRC 67890 ha modificado su horario o profesor.'); }}
                             type="button"
                         >
-                            🕐 Cambio de horario
+                            Cambio de horario
                         </button>
                         <button
                             className="test-btn"

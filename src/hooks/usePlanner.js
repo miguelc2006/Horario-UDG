@@ -98,7 +98,7 @@ function useDebouncedSessionSave(state, delay = 1000) {
 }
 
 export function usePlanner() {
-    const { user } = useAuth();
+    const { user, isAuthorized } = useAuth();
     const { theme } = useOutletContext();
     
     // Estados UI
@@ -212,7 +212,10 @@ export function usePlanner() {
     // --- 4. HANDLERS ---
     const handleSaveCloud = async () => {
         if (!user) return showToast("Debes iniciar sesión para guardar.", 'warning');
-        
+        if (!isAuthorized) {
+            return showToast("Usa un correo @alumnos.udg.mx para guardar horarios.", 'warning');
+        }
+
         const selectedClasses = materias.filter(m => selectedNRCs.includes(m.nrc));
         
         const scheduleData = { 
@@ -258,6 +261,11 @@ export function usePlanner() {
     };
 
     const handleNameModalConfirm = async () => {
+        if (!isAuthorized) {
+            setShowNameModal(false);
+            showToast("Usa un correo @alumnos.udg.mx para guardar horarios.", 'warning');
+            return;
+        }
         const name = pendingName?.trim();
         if (!name) return;
         setShowNameModal(false);

@@ -1,0 +1,79 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function owns(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function isStudent() {
+      return signedIn()
+        && request.auth.token.email is string
+        && request.auth.token.email.matches('.*@alumnos[.]udg[.]mx');
+    }
+
+    function isAcademic() {
+      return signedIn()
+        && request.auth.token.email is string
+        && request.auth.token.email.matches('.*@academicos[.]udg[.]mx');
+    }
+
+    function isInstitutional() {
+      return isStudent() || isAcademic();
+    }
+
+    // Horarios cloud: capacidad exclusiva de alumnos.
+    match /users/{userId}/schedules/{scheduleId} {
+      allow read, write: if owns(userId) && isStudent();
+    }
+
+    // Notificaciones, monitoreo, tokens y preferencias: alumnos y académicos.
+    match /users/{userId}/monitored-courses/{documentId} {
+      allow read, write: if owns(userId) && isInstitutional();
+    }
+    match /users/{userId}/notifications/{documentId} {
+      allow read, write: if owns(userId) && isInstitutional();
+    }
+    match /users/{userId}/fcmTokens/{documentId} {
+      allow read, write: if owns(userId) && isInstitutional();
+    }
+    match /users/{userId}/notificationPrefs/{documentId} {
+      allow read, write: if owns(userId) && isInstitutional();
+    }
+
+    // Deniega por defecto cualquier subcolección personal no contemplada.
+    match /users/{userId}/{document=**} {
+      allow read, write: if false;
+    }
+
+    // Caché pública de profesores; solo perfiles institucionales escriben.
+    match /professors/{professorId} {
+      allow read: if true;
+      allow write: if isInstitutional();
+    }
+
+    // Evaluaciones públicas; alumnos y académicos pueden crearlas y solo el
+    // autor puede modificar o borrar las suyas.
+    match /ratings/{ratingId} {
+      allow read: if true;
+      allow create: if isInstitutional()
+        && request.resource.data.userId == request.auth.uid;
+      allow update: if isInstitutional()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId;
+      allow delete: if isInstitutional()
+        && resource.data.userId == request.auth.uid;
+    }
+
+    // Solo Firebase Admin puede leer/escribir perfiles y auditoría internos.
+    match /internal-account-profiles/{userId} {
+      allow read, write: if false;
+    }
+    match /account-audit-events/{eventId} {
+      allow read, write: if false;
+    }
+  }
+}

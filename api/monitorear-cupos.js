@@ -76,7 +76,6 @@ export default async function handler(req, res) {
         for (const queueDoc of queueSnapshot.docs) {
             const queueData = queueDoc.data();
             const { nrc, ciclop, cup, majrp, lastSeats, lastData } = queueData;
-            const nrcKey = queueDoc.id;
 
             try {
                 // 2. Consultar SIIAU
@@ -114,16 +113,19 @@ export default async function handler(req, res) {
 
                 // 5. Si hay cambios relevantes, notificar a subscribers
                 if (cambios.length > 0 && !(cambios.length === 1 && cambios[0] === 'initial')) {
-                    // Obtener lista de usuarios que monitorean este NRC
+                    // Firestore filtra por NRC; la verificación explícita de ciclo
+                    // evita alertas cruzadas sin exigir un índice compuesto nuevo.
                     const subscribersSnapshot = await db.collectionGroup('monitored-courses')
-                        .where('nrc', '==', nrc)
+                        .where('nrc', '==', String(nrc))
                         .get();
 
                     const notifiedUsers = new Set();
                     for (const subDoc of subscribersSnapshot.docs) {
                         const subData = subDoc.data();
+                        const subscriberCycle = String(subData.ciclo || subData.ciclop || '').trim();
+                        if (subscriberCycle !== String(ciclop || '').trim()) continue;
+
                         const userUid = subDoc.ref.path.split('/')[1];
-                        
                         if (notifiedUsers.has(userUid)) continue;
                         notifiedUsers.add(userUid);
 

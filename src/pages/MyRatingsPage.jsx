@@ -3,11 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getMyRatings } from '../services/myRatingsService';
 import RatingForm from '../components/RatingForm';
+import { showToast } from '../utils/toast';
 import './MyRatingsPage.css';
 
 export function MyRatingsPage() {
     const navigate = useNavigate();
-    const { user } = useAuth();
+    const { user, canManageRatings } = useAuth();
     const [ratings, setRatings] = useState([]);
     const [loading, setLoading] = useState(true);
     const [editingRating, setEditingRating] = useState(null);
@@ -17,12 +18,17 @@ export function MyRatingsPage() {
             navigate('/');
             return;
         }
+        if (!canManageRatings) {
+            setRatings([]);
+            setLoading(false);
+            return;
+        }
         loadMyRatings();
-    }, [user, navigate]);
+    }, [user, canManageRatings, navigate]);
 
     const loadMyRatings = async () => {
-        if (!user) return;
-        
+        if (!user || !canManageRatings) return;
+
         setLoading(true);
         try {
             const myRatings = await getMyRatings(user.uid);
@@ -35,6 +41,10 @@ export function MyRatingsPage() {
     };
 
     const handleEdit = (rating) => {
+        if (!canManageRatings) {
+            showToast('Usa un correo @alumnos.udg.mx o @academicos.udg.mx para editar evaluaciones.', 'warning');
+            return;
+        }
         setEditingRating(rating);
     };
 
@@ -98,7 +108,7 @@ export function MyRatingsPage() {
                         <span className="summary-count">{ratings.length}</span>
                         <span className="summary-label">evaluaciones realizadas</span>
                     </div>
-                    
+
                     <div className="ratings-list">
                         {ratings.map(rating => (
                             <div key={rating.id} className="rating-card">
@@ -107,26 +117,26 @@ export function MyRatingsPage() {
                                         <h3>{formatProfessorName(rating.professorId)}</h3>
                                         <span className="rating-date">{formatDate(rating.createdAt)}</span>
                                     </div>
-                                    <button 
+                                    <button
                                         className="edit-rating-btn"
                                         onClick={() => handleEdit(rating)}
                                     >
                                         Editar
                                     </button>
                                 </div>
-                                
+
                                 <div className="rating-details">
                                     <div className="rating-stars">
                                         <span className="stars-text">{renderStars(rating.stars)}</span>
                                         <span className="stars-number">{rating.stars}/10</span>
                                     </div>
-                                    
+
                                     <div className="rating-difficulty">
                                         <span className="difficulty-label">Dificultad:</span>
                                         <span className="difficulty-value">{rating.difficulty}/10</span>
                                     </div>
                                 </div>
-                                
+
                                 {rating.tags && rating.tags.length > 0 && (
                                     <div className="rating-tags">
                                         {rating.tags.map((tag, idx) => (
@@ -134,7 +144,7 @@ export function MyRatingsPage() {
                                         ))}
                                     </div>
                                 )}
-                                
+
                                 {rating.comment && (
                                     <div className="rating-comment">
                                         <p>"{rating.comment}"</p>

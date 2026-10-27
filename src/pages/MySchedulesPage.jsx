@@ -44,7 +44,7 @@ const groupSessionsByNRC = (classes) => {
 };
 
 export function MySchedulesPage() {
-    const { user } = useAuth();
+    const { user, isAuthorized } = useAuth();
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
     const { isMonitoring } = useNotifications();
@@ -67,7 +67,6 @@ export function MySchedulesPage() {
     const [editError, setEditError] = useState(null);
     const [editSaving, setEditSaving] = useState(false);
     const [loadingSchedule, setLoadingSchedule] = useState(false);
-    const [confirmingDelete, setConfirmingDelete] = useState(null);
     const [isDeleting, setIsDeleting] = useState(false);
     // Nombre editable
     const [editingName, setEditingName] = useState(false);
@@ -134,14 +133,19 @@ export function MySchedulesPage() {
 
     // --- Cargar horario a editar cuando editingScheduleId cambia ---
     useEffect(() => {
-        if (!editingScheduleId || !user) return;
+        if (!editingScheduleId || !user || !isAuthorized) return;
         loadScheduleForEdit(editingScheduleId);
-    }, [editingScheduleId, user]);
+    }, [editingScheduleId, user, isAuthorized]);
 
     // --- Cargar lista ---
     useEffect(() => {
-        if (user) loadSchedules();
-    }, [user]);
+        if (user && isAuthorized) {
+            loadSchedules();
+        } else {
+            setSchedules([]);
+            setLoading(false);
+        }
+    }, [user, isAuthorized]);
 
     const loadSchedules = async () => {
         setLoading(true);
@@ -277,6 +281,10 @@ export function MySchedulesPage() {
 
     const handleEditSave = async () => {
         if (!user || !editingScheduleId || !editorData) return;
+        if (!isAuthorized) {
+            showToast('Usa un correo @alumnos.udg.mx para modificar horarios.', 'warning');
+            return;
+        }
         const selectedClasses = editMaterias.filter(m => editSelectedNRCs.includes(m.nrc));
         const scheduleData = { materias: selectedClasses, selectedNRCs: editSelectedNRCs, formParams: editFormParams, calendarioLabel: editCalendarioLabel };
         setEditSaving(true);
@@ -298,7 +306,7 @@ export function MySchedulesPage() {
     // Resolver conflictos del editor (sync = usar nuevos, keep = mantener viejos)
     const resolveEditConflicts = (action) => {
         if (!editPendingDataRef.current) return;
-        const { newData, oldMaterias, oldSelectedNRCs } = editPendingDataRef.current;
+        const { newData, oldMaterias } = editPendingDataRef.current;
         const conflictedNRCs = editConflicts.map(c => String(c.nrc));
 
         if (action === 'sync') {
@@ -330,12 +338,21 @@ export function MySchedulesPage() {
 
     const handleEditDuplicate = async () => {
         if (!user) return;
+        if (!isAuthorized) {
+            showToast('Usa un correo @alumnos.udg.mx para duplicar horarios.', 'warning');
+            return;
+        }
         setDuplicateName((editorData?.name || "Mi Horario") + " (copia)");
         setShowDuplicateModal(true);
     };
 
     const confirmDuplicate = async () => {
         if (!user) return;
+        if (!isAuthorized) {
+            setShowDuplicateModal(false);
+            showToast('Usa un correo @alumnos.udg.mx para duplicar horarios.', 'warning');
+            return;
+        }
         const name = duplicateName?.trim();
         if (!name) return;
         setShowDuplicateModal(false);
@@ -356,11 +373,20 @@ export function MySchedulesPage() {
 
     const handleEditDelete = async () => {
         if (!user || !editingScheduleId) return;
+        if (!isAuthorized) {
+            showToast('Usa un correo @alumnos.udg.mx para eliminar horarios.', 'warning');
+            return;
+        }
         setShowEditorDeleteModal(true);
     };
 
     const confirmEditorDelete = async () => {
         if (!user || !editingScheduleId) return;
+        if (!isAuthorized) {
+            setShowEditorDeleteModal(false);
+            showToast('Usa un correo @alumnos.udg.mx para eliminar horarios.', 'warning');
+            return;
+        }
         setShowEditorDeleteModal(false);
         setIsDeleting(true);
         try {
@@ -399,15 +425,12 @@ export function MySchedulesPage() {
         navigate('/planear');
     };
 
-    const handleCardClick = (sch) => {
-        if (editingScheduleId === sch.id) {
-            editorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            return;
-        }
-    };
-
     // Click en la cabecera/tarjeta (no en el área de toggle) → seleccionar para editar
     const handleCardSelect = (sch) => {
+        if (!isAuthorized) {
+            showToast('Tu cuenta está en modo consulta y no tiene horarios guardados.', 'warning');
+            return;
+        }
         if (editingScheduleId === sch.id) return;
         setEditingScheduleId(sch.id);
         setSearchParams({ edit: sch.id });
@@ -424,12 +447,21 @@ export function MySchedulesPage() {
 
     const openDeleteModal = (e, id) => {
         e.stopPropagation();
+        if (!isAuthorized) {
+            showToast('Usa un correo @alumnos.udg.mx para eliminar horarios.', 'warning');
+            return;
+        }
         setScheduleToDelete(id);
         setIsDeleteModalOpen(true);
     };
 
     const confirmDelete = async () => {
         if (!scheduleToDelete) return;
+        if (!isAuthorized) {
+            setIsDeleteModalOpen(false);
+            showToast('Usa un correo @alumnos.udg.mx para eliminar horarios.', 'warning');
+            return;
+        }
         setIsDeleting(true);
         try {
             await deleteSchedule(user.uid, scheduleToDelete);
@@ -639,6 +671,7 @@ export function MySchedulesPage() {
                                                 materias={editMaterias}
                                                 selectedNRCs={editSelectedNRCs}
                                                 onSelectionChange={setEditSelectedNRCs}
+                                                ciclo={editFormParams.calendario}
                                                 availableSchedules={schedules}
                                                 currentScheduleId={editingScheduleId}
                                                 deepLinkNrc={deepLinkNrc}

@@ -2,11 +2,12 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext.jsx';
+import { NotificationsProvider } from './context/NotificationsContext.jsx';
 import { Footer } from './components/Footer.jsx';
 import Navbar from './components/Navbar.jsx';
 import { ToastContainer } from './components/Toast.jsx';
 import QueryConsentBanner from './components/QueryConsentBanner.jsx';
-import { initFCM } from './services/notificationService.js';
+import AuthRestrictionBanner from './components/AuthRestrictionBanner.jsx';
 import './App.css';
 
 function App() {
@@ -19,19 +20,11 @@ function App() {
         window.scrollTo(0, 0);
     }, [location.pathname]);
 
-    // Inicializar FCM al cargar la app (solo una vez)
-    useEffect(() => {
-        const hasMessagingSender = import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID;
-        if (hasMessagingSender && 'serviceWorker' in navigator) {
-            initFCM().catch(() => {});
-        }
-    }, []);
-
     useEffect(() => {
         document.body.classList.remove('light-theme', 'dark-theme');
         document.body.classList.add(`${theme}-theme`);
         localStorage.setItem('app-theme', theme);
-        
+
         if (theme === 'dark') document.documentElement.classList.add('dark');
         else document.documentElement.classList.remove('dark');
     }, [theme]);
@@ -42,21 +35,24 @@ function App() {
         // AuthProvider ahora está DENTRO del RouterProvider (porque App es hijo del Router)
         // Esto permite que AuthContext pueda usar hooks de navegación si lo necesita.
         <AuthProvider>
-            <div className="app-root">
-                <a href="#main-content" className="skip-link">
-                    Saltar al contenido principal
-                </a>
-                <Navbar theme={theme} toggleTheme={toggleTheme} />
-                
-                <main className="app-main" id="main-content">
-                    <Outlet context={{ theme }} />
-                </main>
+            <NotificationsProvider>
+                <div className="app-root">
+                    <a href="#main-content" className="skip-link">
+                        Saltar al contenido principal
+                    </a>
+                    <Navbar theme={theme} toggleTheme={toggleTheme} />
+                    <AuthRestrictionBanner />
 
-                <QueryConsentBanner />
-                
-                <Footer />
-            </div>
-            <ToastContainer />
+                    <main className="app-main" id="main-content">
+                        <Outlet context={{ theme }} />
+                    </main>
+
+                    <QueryConsentBanner />
+
+                    <Footer />
+                </div>
+                <ToastContainer />
+            </NotificationsProvider>
         </AuthProvider>
     );
 }

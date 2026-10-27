@@ -9,11 +9,9 @@ import { useNotifications } from '../hooks/useNotifications';
 import { getUserSchedules } from '../services/storageService';
 import {
     getUserNotifications,
-    getMonitoredCourses,
     markNotificationRead,
     deleteNotification,
     deleteAllNotifications,
-    stopMonitoring,
     saveNotificationPref,
     getNotificationPrefs,
 } from '../services/notificationService';
@@ -63,12 +61,19 @@ function getTypeLabel(type) {
 }
 
 export function NotificationsPage() {
-    const { user } = useAuth();
+    const { user, canUseNotifications, canUseCloudSchedules } = useAuth();
     const navigate = useNavigate();
-    const { permission, requestPermission, unreadCount, markAsRead, startMonitor } = useNotifications();
+    const {
+        permission,
+        requestPermission,
+        markAsRead,
+        startMonitor,
+        stopMonitor,
+        monitoredCourses,
+        refreshData,
+    } = useNotifications();
 
     const [notifications, setNotifications] = useState([]);
-    const [monitoredCourses, setMonitoredCourses] = useState([]);
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState('all');
     const [stoppingNrc, setStoppingNrc] = useState(null);
@@ -81,19 +86,24 @@ export function NotificationsPage() {
 
     const loadNotifications = useCallback(async () => {
         if (!user) return;
+        if (!canUseNotifications) {
+            setNotifications([]);
+            setAvailableSchedules([]);
+            setQueryConsent(null);
+            setLoading(false);
+            return;
+        }
         setLoading(true);
-        const [list, courses, schedules, prefs] = await Promise.all([
+        const [list, schedules, prefs] = await Promise.all([
             getUserNotifications(user.uid, 50),
-            getMonitoredCourses(user.uid).catch(() => []),
-            getUserSchedules(user.uid).catch(() => []),
+            canUseCloudSchedules ? getUserSchedules(user.uid).catch(() => []) : Promise.resolve([]),
             getNotificationPrefs(user.uid).catch(() => ({})),
         ]);
         setNotifications(list);
-        setMonitoredCourses(courses);
         setAvailableSchedules(schedules);
         setQueryConsent(prefs.queryConsent !== undefined ? prefs.queryConsent : null);
         setLoading(false);
-    }, [user]);
+    }, [user, canUseNotifications, canUseCloudSchedules]);
 
     useEffect(() => {
         loadNotifications();
@@ -120,7 +130,7 @@ export function NotificationsPage() {
         let scheduleId = notif.data?.scheduleId;
 
         // Si no hay scheduleId pero tenemos nrc, buscar en horarios guardados
-        if (!scheduleId && nrc && user) {
+        if (!scheduleId && nrc && user && canUseCloudSchedules) {
             try {
                 const schedules = await getUserSchedules(user.uid);
                 const match = schedules.find(s => s.selectedNRCs?.some(n => String(n) === String(nrc)));
@@ -132,20 +142,19 @@ export function NotificationsPage() {
             }
         }
 
-        // TODOS los tipos: si hay scheduleId, navegar a la edición del horario
-        // en Mis Horarios con el NRC correspondiente.
-        if (scheduleId) {
+        // Solo alumnos pueden abrir horarios persistidos en la nube.
+        if (scheduleId && canUseCloudSchedules) {
             navigate(`/mis-horarios?edit=${scheduleId}${nrc ? `&nrc=${nrc}` : ''}`);
             return;
         }
 
-        // Fallback por tipo cuando no hay horario vinculado
+        // Fallback seguro por tipo cuando no hay un horario accesible.
         switch (notif.type) {
             case 'seat_available':
-                navigate(nrc ? `/mis-horarios?nrc=${nrc}` : '/mis-horarios');
-                break;
             case 'schedule_change':
-                navigate(nrc ? `/mis-horarios?nrc=${nrc}` : '/mis-horarios');
+                navigate(canUseCloudSchedules
+                    ? (nrc ? `/mis-horarios?nrc=${nrc}` : '/mis-horarios')
+                    : '/planificador');
                 break;
             case 'professor_change':
                 navigate(profesor ? `/profesores?q=${encodeURIComponent(profesor)}` : '/profesores');
@@ -154,12 +163,12 @@ export function NotificationsPage() {
                 navigate('/mis-notificaciones');
                 break;
             default:
-                navigate(nrc ? `/mis-horarios?nrc=${nrc}` : '/dashboard');
+                navigate(canUseCloudSchedules && nrc ? `/mis-horarios?nrc=${nrc}` : '/dashboard');
         }
     };
 
     const handleMarkAllRead = async () => {
-        if (!user) return;
+        if (!user || !canUseNotifications) return;
         const unread = notifications.filter(n => !n.read);
         for (const n of unread) {
             await markNotificationRead(user.uid, n.id);
@@ -170,14 +179,14 @@ export function NotificationsPage() {
 
     const handleDeleteNotification = async (e, notif) => {
         e.stopPropagation();
-        if (!user) return;
+        if (!user || !canUseNotifications) return;
         await deleteNotification(user.uid, notif.id);
         setNotifications(prev => prev.filter(n => n.id !== notif.id));
         showToast('Notificación eliminada', 'info');
     };
 
     const handleClearAll = async () => {
-        if (!user) return;
+        if (!user || !canUseNotifications) return;
         await deleteAllNotifications(user.uid);
         setNotifications([]);
         showToast('Todas las notificaciones eliminadas', 'info');
@@ -185,13 +194,14 @@ export function NotificationsPage() {
 
     /* --- Handlers para el modal de gestión de monitoreo --- */
     const handleOpenManageModal = useCallback((course) => {
+        if (!canUseNotifications) return;
         setManageRegistered(course.registered || false);
         setManageSelectedScheduleIds(course.scheduleIds || (course.scheduleId ? [course.scheduleId] : []));
         setManageModalCourse(course);
-    }, []);
+    }, [canUseNotifications]);
 
     const handleConfirmManage = useCallback(async () => {
-        if (!manageModalCourse || !user) return;
+        if (!manageModalCourse || !user || !canUseNotifications) return;
         setManageLoading(true);
         const mc = manageModalCourse;
         const ok = await startMonitor({
@@ -201,6 +211,7 @@ export function NotificationsPage() {
             profesor: mc.profesor || '',
             cup: mc.cup || '',
             majrp: mc.majrp || '',
+            ciclo: mc.ciclo || mc.ciclop || '',
             horarioLabel: mc.horarioLabel || '',
             registered: manageRegistered,
             scheduleIds: manageSelectedScheduleIds,
@@ -209,12 +220,10 @@ export function NotificationsPage() {
         setManageModalCourse(null);
         if (ok) {
             showToast('Configuración de monitoreo actualizada', 'success');
-            const updated = await getMonitoredCourses(user.uid).catch(() => []);
-            setMonitoredCourses(updated);
         } else {
             showToast('Error al actualizar configuración', 'error');
         }
-    }, [manageModalCourse, manageRegistered, manageSelectedScheduleIds, startMonitor, user]);
+    }, [manageModalCourse, manageRegistered, manageSelectedScheduleIds, startMonitor, user, canUseNotifications]);
 
     const toggleManageSchedule = useCallback((id) => {
         setManageSelectedScheduleIds(prev =>
@@ -302,7 +311,7 @@ export function NotificationsPage() {
                     ) : (
                         <div className="notif-settings-monitored-list">
                             {monitoredCourses.map((mc) => (
-                                <div key={mc.nrc} className="notif-settings-monitored-item">
+                                <div key={`${mc.nrc}_${mc.ciclo || mc.ciclop || ''}`} className="notif-settings-monitored-item">
                                     <div
                                         className="notif-settings-monitored-info"
                                         onClick={() => handleOpenManageModal(mc)}
@@ -328,9 +337,9 @@ export function NotificationsPage() {
                                             onClick={async () => {
                                                 setStoppingNrc(mc.nrc);
                                                 try {
-                                                    await stopMonitoring(mc.nrc, mc.horarioLabel);
-                                                    const updated = await getMonitoredCourses(user.uid);
-                                                    setMonitoredCourses(updated);
+                                                    const stopped = await stopMonitor(mc.nrc, mc.ciclo || mc.ciclop);
+                                                    if (!stopped) throw new Error('No se pudo detener el monitoreo');
+                                                    await refreshData();
                                                     showToast(`Monitoreo de ${mc.materia || mc.nrc} detenido`, 'info');
                                                 } catch {
                                                     showToast('Error al detener monitoreo', 'error');

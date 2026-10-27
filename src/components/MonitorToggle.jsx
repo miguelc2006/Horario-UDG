@@ -2,16 +2,25 @@
 // Botón de campana para activar/desactivar monitoreo de un NRC
 // Se integra en las mini-cards de SeleccionMaterias
 // Soporta vinculación a uno o varios horarios guardados
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../context/AuthContext';
 import { useNotifications } from '../hooks/useNotifications';
 import { showToast } from '../utils/toast.js';
 import './MonitorToggle.css';
 
-const MonitorToggle = React.memo(({ nrc, materia, clave, profesor, cup, majrp, horarioLabel, scheduleId, availableSchedules, currentScheduleId }) => {
-    const { user } = useAuth();
-    const { isMonitoring, getMonitorData, startMonitor, stopMonitor, requestPermission, permission } = useNotifications();
+const MonitorToggle = React.memo(({ nrc, materia, clave, profesor, cup, majrp, ciclo, horarioLabel, scheduleId, availableSchedules, currentScheduleId }) => {
+    const { user, canUseNotifications } = useAuth();
+    const {
+        isMonitoring,
+        getMonitorData,
+        startMonitor,
+        stopMonitor,
+        requestPermission,
+        permission,
+        deviceRegistered,
+        deviceError,
+    } = useNotifications();
     const [showModal, setShowModal] = useState(false);
     const [loading, setLoading] = useState(false);
     const [registered, setRegistered] = useState(false);
@@ -19,8 +28,8 @@ const MonitorToggle = React.memo(({ nrc, materia, clave, profesor, cup, majrp, h
     // Estado para selección de horarios
     const [selectedScheduleIds, setSelectedScheduleIds] = useState([]);
 
-    const monitoring = isMonitoring(nrc);
-    const monitorData = getMonitorData(nrc);
+    const monitoring = isMonitoring(nrc, ciclo);
+    const monitorData = getMonitorData(nrc, ciclo);
 
     // Pre-seleccionar horarios que contienen este NRC o el currentScheduleId
     const handleOpenModal = useCallback(() => {
@@ -55,28 +64,38 @@ const MonitorToggle = React.memo(({ nrc, materia, clave, profesor, cup, majrp, h
             showToast('Debes iniciar sesión para monitorear materias.', 'warning');
             return;
         }
+        if (!canUseNotifications) {
+            showToast('Usa un correo @alumnos.udg.mx o @academicos.udg.mx para monitorear materias.', 'warning');
+            return;
+        }
 
         // Si ya está monitoreando, desactivar
         if (monitoring) {
             setLoading(true);
-            await stopMonitor(nrc, horarioLabel);
+            const stopped = await stopMonitor(nrc, ciclo);
             setLoading(false);
+            if (!stopped) showToast('No se pudo detener el monitoreo. Intenta de nuevo.', 'error');
             return;
         }
 
-        // Si no tiene permiso de notificaciones, solicitarlo
-        if (permission !== 'granted') {
-            const granted = await requestPermission();
-            if (!granted) {
-                if (Notification.permission === 'denied') {
-                    showToast('Notificaciones bloqueadas. Puedes monitorear sin alerts push. Actívalas en la configuración del navegador.', 'warning');
-                }
+        // El monitoreo solo se activa si este dispositivo puede recibir push.
+        if (permission !== 'granted' || !deviceRegistered) {
+            const registeredDevice = await requestPermission();
+            if (!registeredDevice) {
+                const blocked = typeof Notification !== 'undefined' && Notification.permission === 'denied';
+                showToast(
+                    blocked
+                        ? 'Notificaciones bloqueadas. Actívalas en la configuración del navegador.'
+                        : (deviceError || 'No se pudo registrar este dispositivo para recibir notificaciones.'),
+                    'warning'
+                );
+                return;
             }
         }
 
         // Mostrar modal para configurar tipo de monitoreo
         handleOpenModal();
-    }, [user, monitoring, nrc, horarioLabel, permission, requestPermission, stopMonitor, handleOpenModal]);
+    }, [user, canUseNotifications, monitoring, nrc, ciclo, permission, deviceRegistered, deviceError, requestPermission, stopMonitor, handleOpenModal]);
 
     const handleConfirmMonitor = useCallback(async () => {
         setLoading(true);
@@ -89,6 +108,7 @@ const MonitorToggle = React.memo(({ nrc, materia, clave, profesor, cup, majrp, h
             profesor: profesor || '',
             cup: cup || '',
             majrp: majrp || '',
+            ciclo: ciclo || '',
             horarioLabel: horarioLabel || '',
             registered,
             scheduleIds: selectedScheduleIds.length > 0 ? selectedScheduleIds : (scheduleId ? [scheduleId] : []),
@@ -98,7 +118,7 @@ const MonitorToggle = React.memo(({ nrc, materia, clave, profesor, cup, majrp, h
         if (!ok) {
             showToast('Error al activar monitoreo. Intenta de nuevo.', 'error');
         }
-    }, [nrc, materia, clave, profesor, cup, majrp, horarioLabel, registered, selectedScheduleIds, scheduleId, startMonitor]);
+    }, [nrc, materia, clave, profesor, cup, majrp, ciclo, horarioLabel, registered, selectedScheduleIds, scheduleId, startMonitor]);
 
     // Determinar estado visual
     let icon = '🔕';
@@ -166,7 +186,7 @@ const MonitorToggle = React.memo(({ nrc, materia, clave, profesor, cup, majrp, h
                                     <p>🎯 Te avisaremos cuando haya <strong>cupos disponibles</strong> para esta materia.</p>
                                 )}
                                 <p className="monitor-info-note">
-                                    Las verificaciones se realizan cada ~15 minutos. 
+                                    Las verificaciones se realizan cada ~15 minutos.
                                     Necesitarás tener las notificaciones activadas.
                                 </p>
                             </div>

@@ -76,7 +76,7 @@ const NrcSelectionModal = ({ materia, nrcsDisponibles, selectedNrc, onNrcChange,
     );
 };
 
-export function SeleccionMaterias({ materias, selectedNRCs, onSelectionChange, availableSchedules, currentScheduleId, deepLinkNrc, highlightNrc }) {
+export function SeleccionMaterias({ materias, selectedNRCs, onSelectionChange, ciclo, availableSchedules, currentScheduleId, deepLinkNrc, highlightNrc }) {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedSubjects, setSelectedSubjects] = useState([]);
     const [materiaEnModal, setMateriaEnModal] = useState(null);
@@ -245,6 +245,7 @@ export function SeleccionMaterias({ materias, selectedNRCs, onSelectionChange, a
                                             profesor={subject.selectedNrc.profesor}
                                             cup={subject.selectedNrc.cup || ''}
                                             majrp={subject.selectedNrc.majrp || ''}
+                                            ciclo={ciclo}
                                             horarioLabel={subject.selectedNrc.horarioLabel || ''}
                                             scheduleId={subject.selectedNrc.scheduleId}
                                             availableSchedules={availableSchedules}

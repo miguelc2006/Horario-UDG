@@ -9,7 +9,20 @@ import './NotificationBell.css';
 
 const NotificationBell = React.memo(() => {
     const { user } = useAuth();
-    const { unreadCount, notifications, fetchNotifications, markAsRead, removeNotification, clearAllNotifications, requestPermission, permission } = useNotifications();
+    const {
+        unreadCount,
+        notifications,
+        fetchNotifications,
+        markAsRead,
+        removeNotification,
+        clearAllNotifications,
+        requestPermission,
+        permission,
+        deviceRegistered,
+        deviceRegistrationStatus,
+        deviceError,
+        isRequestingPermission,
+    } = useNotifications();
     const [isOpen, setIsOpen] = useState(false);
     const dropdownRef = useRef(null);
     const bellRef = useRef(null);
@@ -49,7 +62,6 @@ const NotificationBell = React.memo(() => {
 
         // Deep linking según tipo de notificación
         const nrc = notif.data?.nrc;
-        const materia = notif.data?.materia;
         const profesor = notif.data?.profesor;
         let scheduleId = notif.data?.scheduleId;
 
@@ -219,12 +231,28 @@ const NotificationBell = React.memo(() => {
                         )}
                     </div>
 
-                    {permission !== 'granted' && (
+                    {!deviceRegistered && (
                         <div className="notification-permission-cta">
-                            <p>¿Quieres recibir alertas push?</p>
-                            <button onClick={handleEnableNotifications} className="btn-enable-notif">
-                                Activar notificaciones
-                            </button>
+                            <p>
+                                {permission === 'denied'
+                                    ? 'El navegador bloqueó las alertas push. Habilítalas desde su configuración.'
+                                    : permission === 'granted'
+                                        ? deviceError || 'El permiso existe, pero falta registrar este dispositivo.'
+                                        : '¿Quieres recibir alertas push en este dispositivo?'}
+                            </p>
+                            {permission !== 'denied' && (
+                                <button
+                                    onClick={handleEnableNotifications}
+                                    className="btn-enable-notif"
+                                    disabled={isRequestingPermission || deviceRegistrationStatus === 'registering'}
+                                >
+                                    {isRequestingPermission || deviceRegistrationStatus === 'registering'
+                                        ? 'Registrando…'
+                                        : permission === 'granted'
+                                            ? 'Registrar dispositivo'
+                                            : 'Activar notificaciones'}
+                                </button>
+                            )}
                         </div>
                     )}
 

@@ -10,11 +10,11 @@ import './QueryConsentBanner.css';
 const STORAGE_KEY = 'horario-udg-query-consent';
 
 export default function QueryConsentBanner() {
-    const { user } = useAuth();
+    const { user, canUseNotifications } = useAuth();
     const [visible, setVisible] = useState(false);
 
     useEffect(() => {
-        if (!user) {
+        if (!user || !canUseNotifications) {
             setVisible(false);
             return;
         }
@@ -28,13 +28,13 @@ export default function QueryConsentBanner() {
 
         // No hay respuesta aún → mostrar
         setVisible(true);
-    }, [user]);
+    }, [user, canUseNotifications]);
 
     const handleAccept = async () => {
         localStorage.setItem(STORAGE_KEY, 'granted');
         setVisible(false);
         // Persistir en Firestore
-        if (user) {
+        if (user && canUseNotifications) {
             try {
                 await saveNotificationPref(user.uid, { queryConsent: true });
             } catch { /* falla silenciosa */ }
@@ -44,7 +44,7 @@ export default function QueryConsentBanner() {
     const handleDecline = async () => {
         localStorage.setItem(STORAGE_KEY, 'denied');
         setVisible(false);
-        if (user) {
+        if (user && canUseNotifications) {
             try {
                 await saveNotificationPref(user.uid, { queryConsent: false });
             } catch { /* falla silenciosa */ }
@@ -60,9 +60,9 @@ export default function QueryConsentBanner() {
                 <div className="qconsent-content">
                     <strong>Ayuda a la comunidad</strong>
                     <p>
-                        ¿Permites que tus consultas al SIIAU también ayuden a verificar 
-                        materias que otros estudiantes están esperando? Es anónimo, 
-                        automático y no afecta tu consulta. 
+                        ¿Permites que tus consultas al SIIAU también ayuden a verificar
+                        materias que otros estudiantes están esperando? Es anónimo,
+                        automático y no afecta tu consulta.
                         <Link to="/privacidad" className="qconsent-link"> Más info</Link>
                     </p>
                 </div>

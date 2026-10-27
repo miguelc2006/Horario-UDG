@@ -36,7 +36,7 @@ const ClaseCard = ({ clase, tieneCruce, onRemove, isTapped, onTap, isDayMode }) 
             marginLeft: '2%',
             zIndex: isTapped ? 100 : 10
         }}
-        onClick={(e) => { onTap?.(clase.nrc, clase.dia); }}
+        onClick={() => { onTap?.(clase.nrc, clase.dia); }}
         >
             <div className={cardClassName}>
                 {/* Botón de eliminar */}

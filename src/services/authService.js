@@ -13,20 +13,17 @@ provider.setCustomParameters({
     prompt: "select_account"
 });
 
+/**
+ * Inicia sesión con cualquier cuenta de Google.
+ * La autorización para persistir datos se evalúa después mediante AuthContext
+ * y las guardias de servicio; una cuenta no institucional conserva acceso de consulta.
+ *
+ * @returns {Promise<import('firebase/auth').User>} Usuario autenticado.
+ */
 export const loginWithGoogle = async () => {
     try {
         const result = await signInWithPopup(auth, provider);
-        const user = result.user;
-
-        // --- VALIDACIÓN DE DOMINIO UDG ---
-        // Verificamos si el correo termina en @alumnos.udg.mx o @udg.mx (para profesores/admin)
-        if (!user.email.endsWith('@alumnos.udg.mx') && !user.email.endsWith('@udg.mx')) {
-            // Si no es válido, cerramos la sesión inmediatamente
-            await firebaseSignOut(auth);
-            throw new Error("ACCESO DENEGADO: Debes usar tu correo institucional (@alumnos.udg.mx).");
-        }
-
-        return user;
+        return result.user;
     } catch (error) {
         // Relanzamos el error para manejarlo en el componente visual (Navbar)
         console.error("Error en login:", error.message);

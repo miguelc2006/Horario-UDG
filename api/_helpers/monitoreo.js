@@ -92,13 +92,15 @@ export async function verificarNrcsMonitoreados(resultados, params, admin, db) {
 
                 try {
                     const subscribersSnapshot = await db.collectionGroup('monitored-courses')
-                        .where('nrc', '==', nrc)
+                        .where('nrc', '==', String(nrc))
                         .get();
 
                     for (const subDoc of subscribersSnapshot.docs) {
                         const subData = subDoc.data();
-                        const userUid = subDoc.ref.path.split('/')[1];
+                        const subscriberCycle = String(subData.ciclo || subData.ciclop || '').trim();
+                        if (subscriberCycle !== String(ciclop).trim()) continue;
 
+                        const userUid = subDoc.ref.path.split('/')[1];
                         if (notifiedUsers.has(userUid)) continue;
                         notifiedUsers.add(userUid);
 

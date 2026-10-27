@@ -1,5 +1,9 @@
 // src/services/professorService.js
-import { getDb } from "../firebase/config";
+import { auth, getDb } from "../firebase/config";
+import {
+  canUpdateProfessorCache,
+  requireRatingsAccess,
+} from "../utils/authGuard";
 
 let _firestore = null;
 async function getFirestoreModules() {
@@ -19,7 +23,7 @@ const COLL_RATINGS = "ratings";
  */
 export const normalizeSiiauName = (rawName) => {
     if (!rawName || rawName.includes("POR ASIGNAR") || rawName.includes("---")) return null;
-    
+
     // Convertir APELLIDOS, NOMBRES -> NOMBRES APELLIDOS
     if (rawName.includes(",")) {
         const [apellidos, nombres] = rawName.split(",").map(s => s.trim());
@@ -57,7 +61,7 @@ export const getProfessorsByNames = async (names) => {
         // Usar IDs con underscores para coincidir con cómo se guardan en Firestore
         const ids = names.map(n => normalizeName(n).replace(/\s+/g, "_"));
         const results = {};
-        
+
         // Firestore no permite 'in' con más de 10 elementos, así que lo hacemos por chunks
         for (let i = 0; i < ids.length; i += 10) {
             const chunk = ids.slice(i, i + 10);
@@ -86,17 +90,17 @@ export const getProfessorData = async (professorName) => {
 
     try {
         const profSnap = await getDoc(profRef);
-        
+
         // Si existe en caché y es reciente (ej: < 15 días) y tiene los campos correctos
         if (profSnap.exists()) {
             const data = profSnap.data();
             const lastUpdate = data.updatedAt?.toDate() || 0;
             const diffDays = (new Date() - lastUpdate) / (1000 * 60 * 60 * 24);
-            
+
             // Invalida el caché si: es viejo, tiene notFound, o tiene el formato antiguo (sin ratingMP)
             const isStale = diffDays >= 15;
             const isBadFormat = !data.notFound && data.ratingMP === undefined;
-            
+
             if (!isStale && !isBadFormat) {
                 return { ...data, id: docId, isCached: true };
             }
@@ -106,13 +110,13 @@ export const getProfessorData = async (professorName) => {
         // Si no está en caché o es viejo, consultamos la API de scraping
         console.log(`[professorService] Consultando API externa para: "${cleanName}"`);
         const response = await fetch(`/api/get-professor?name=${encodeURIComponent(cleanName)}`);
-        
+
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
             console.error(`[professorService] Error API (${response.status}):`, errorData);
-            
+
             // Si no se encuentra en MisProfesores, registramos al menos el nombre para evitar re-consultas fallidas continuas
-            if (response.status === 404) {
+            if (response.status === 404 && canUpdateProfessorCache(auth.currentUser?.email)) {
                 await setDoc(profRef, {
                     name: cleanName,
                     updatedAt: serverTimestamp(),
@@ -142,7 +146,11 @@ export const getProfessorData = async (professorName) => {
         };
 
 
-        await setDoc(profRef, newProfData, { merge: true });
+        // La consulta pública sigue disponible, pero solo una cuenta institucional
+        // puede actualizar la caché persistente de Firestore.
+        if (canUpdateProfessorCache(auth.currentUser?.email)) {
+            await setDoc(profRef, newProfData, { merge: true });
+        }
 
         return { ...newProfData, id: docId, isCached: false };
 
@@ -157,9 +165,10 @@ export const getProfessorData = async (professorName) => {
  */
 export const addRating = async (professorId, ratingInfo) => {
     try {
+        requireRatingsAccess(auth.currentUser);
         const { db, collection, addDoc, doc, updateDoc, increment, serverTimestamp } = await getFirestoreModules();
         const ratingRef = collection(db, COLL_RATINGS);
-        
+
         // Guardar la evaluación individual
         await addDoc(ratingRef, {
             professorId,
@@ -169,7 +178,7 @@ export const addRating = async (professorId, ratingInfo) => {
 
         // Actualizar los promedios en el documento del profesor
         const profRef = doc(db, COLL_PROFESSORS, professorId);
-        
+
         await updateDoc(profRef, {
             nativeRatingCount: increment(1),
             nativeRatingSum: increment(ratingInfo.stars),
@@ -195,13 +204,13 @@ export const searchProfessors = async (searchTerm = "", limitCount = 20) => {
             where("name", ">=", normalizedSearch),
             where("name", "<=", normalizedSearch + "\uf8ff")
         );
-        
+
         const querySnapshot = await getDocs(q);
         const results = [];
         querySnapshot.forEach((doc) => {
             results.push({ id: doc.id, ...doc.data() });
         });
-        
+
         return results.slice(0, limitCount);
     } catch (error) {
         console.error("Error al buscar profesores:", error);

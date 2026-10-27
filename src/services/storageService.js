@@ -1,4 +1,5 @@
-import { getDb } from "../firebase/config";
+import { auth, getDb } from "../firebase/config";
+import { isEmailAuthorized, requireAuthorizedUser } from "../utils/authGuard";
 
 let _firestore = null;
 async function getFirestoreModules() {
@@ -15,6 +16,7 @@ async function getFirestoreModules() {
  */
 export const createSchedule = async (userId, scheduleData, name) => {
   try {
+    requireAuthorizedUser(auth.currentUser);
     const { db, collection, addDoc } = await getFirestoreModules();
     const schedulesRef = collection(db, "users", userId, "schedules");
     const docRef = await addDoc(schedulesRef, {
@@ -35,6 +37,7 @@ export const createSchedule = async (userId, scheduleData, name) => {
  */
 export const updateSchedule = async (userId, scheduleId, scheduleData) => {
   try {
+    requireAuthorizedUser(auth.currentUser);
     const { db, doc, updateDoc } = await getFirestoreModules();
     const docRef = doc(db, "users", userId, "schedules", scheduleId);
     await updateDoc(docRef, {
@@ -52,6 +55,8 @@ export const updateSchedule = async (userId, scheduleId, scheduleData) => {
  * Obtiene la lista de todos los horarios del usuario.
  */
 export const getUserSchedules = async (userId) => {
+  if (!auth.currentUser || !isEmailAuthorized(auth.currentUser.email)) return [];
+
   try {
     const { db, collection, query, orderBy, getDocs } = await getFirestoreModules();
     const schedulesRef = collection(db, "users", userId, "schedules");
@@ -73,6 +78,7 @@ export const getUserSchedules = async (userId) => {
  */
 export const deleteSchedule = async (userId, scheduleId) => {
   try {
+    requireAuthorizedUser(auth.currentUser);
     const { db, doc, deleteDoc } = await getFirestoreModules();
     await deleteDoc(doc(db, "users", userId, "schedules", scheduleId));
     return true;

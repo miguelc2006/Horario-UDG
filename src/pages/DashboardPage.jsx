@@ -1,55 +1,70 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useNotifications } from '../hooks/useNotifications';
 import { clearSession } from '../utils/session';
 import { getUserSchedules } from '../services/storageService';
 import { getMyRatings } from '../services/myRatingsService';
-import { getMonitoredCourses, getUserNotifications, stopMonitoring } from '../services/notificationService';
 import { showToast } from '../utils/toast';
 import './DashboardPage.css';
 
+/**
+ * Presenta un resumen de la actividad disponible para el perfil autenticado.
+ * Cada fuente persistente se consulta y muestra únicamente cuando la cuenta
+ * posee la capacidad correspondiente.
+ *
+ * @returns {React.JSX.Element} Dashboard personalizado por capacidades.
+ */
 export function DashboardPage() {
-    const { user } = useAuth();
+    const {
+        user,
+        canUseCloudSchedules,
+        canManageRatings,
+        canUseNotifications,
+    } = useAuth();
     const navigate = useNavigate();
-
-    const { permission, requestPermission } = useNotifications();
+    const {
+        permission,
+        monitoredCourses,
+        unreadCount,
+        stopMonitor,
+        requestPermission,
+        deviceRegistered,
+        deviceRegistrationStatus,
+        deviceError,
+        isRequestingPermission,
+    } = useNotifications();
 
     const [schedules, setSchedules] = useState([]);
     const [ratings, setRatings] = useState([]);
-    const [monitoredCourses, setMonitoredCourses] = useState([]);
-    const [notifications, setNotifications] = useState([]);
     const [loading, setLoading] = useState(true);
 
-    const unreadCount = notifications.filter(n => !n.read).length;
+    const loadDashboardData = useCallback(async () => {
+        if (!user) return;
+
+        setLoading(true);
+        try {
+            const [schedulesData, ratingsData] = await Promise.all([
+                canUseCloudSchedules ? getUserSchedules(user.uid) : Promise.resolve([]),
+                canManageRatings ? getMyRatings(user.uid) : Promise.resolve([]),
+            ]);
+            setSchedules(schedulesData);
+            setRatings(ratingsData);
+        } catch (error) {
+            console.error('Error loading dashboard data:', error);
+        } finally {
+            setLoading(false);
+        }
+    }, [user, canUseCloudSchedules, canManageRatings]);
 
     useEffect(() => {
         if (!user) {
             navigate('/');
             return;
         }
-        loadDashboardData();
-    }, [user, navigate]);
 
-    const loadDashboardData = async () => {
-        setLoading(true);
-        try {
-            const [schedulesData, ratingsData, monitoredData, notificationsData] = await Promise.all([
-                getUserSchedules(user.uid),
-                getMyRatings(user.uid),
-                getMonitoredCourses(user.uid).catch(() => []),
-                getUserNotifications(user.uid).catch(() => []),
-            ]);
-            setSchedules(schedulesData);
-            setRatings(ratingsData);
-            setMonitoredCourses(monitoredData);
-            setNotifications(notificationsData);
-        } catch (error) {
-            console.error("Error loading dashboard data:", error);
-        } finally {
-            setLoading(false);
-        }
-    };
+        loadDashboardData();
+    }, [user, navigate, loadDashboardData]);
 
     const handleNewSchedule = () => {
         clearSession();
@@ -94,31 +109,32 @@ export function DashboardPage() {
     };
 
     const stats = [
-        {
+        canUseCloudSchedules && {
+            id: 'schedules',
             icon: '📅', label: 'Horarios', value: schedules.length,
             color: 'var(--primary-color)', bg: 'var(--primary-color-light)',
             link: '/mis-horarios',
         },
-        {
+        canManageRatings && {
+            id: 'ratings',
             icon: '⭐', label: 'Evaluaciones', value: ratings.length,
             color: 'var(--star-active-color)', bg: 'var(--tag-yellow-bg)',
             link: '/mis-evaluaciones',
         },
-        {
-            icon: '🔔', label: 'Notificaciones', value: unreadCount,
-            color: 'var(--primary-color)', bg: 'var(--primary-color-light)',
-            link: '/mis-notificaciones',
-        },
-        {
-            icon: '📡', label: 'Monitoreo', value: monitoredCourses.length,
+        canUseNotifications && {
+            id: 'alerts',
+            icon: '🔔', label: 'Monitoreo y alertas',
             color: 'var(--success-color)', bg: 'var(--tag-green-bg)',
             link: '/mis-notificaciones',
+            metrics: [
+                { label: 'no leídas', value: unreadCount },
+                { label: 'monitoreos', value: monitoredCourses.length },
+            ],
         },
-    ];
+    ].filter(Boolean);
 
     const recentSchedules = schedules.slice(0, 3);
     const recentRatings = ratings.slice(0, 3);
-    const recentMonitored = monitoredCourses.slice(0, 5);
 
     if (loading) {
         return (
@@ -154,28 +170,38 @@ export function DashboardPage() {
             </header>
 
             {/* === STATS ROW === */}
-            <div className="stats-row">
-                {stats.map((stat, i) => (
-                    <div
-                        key={i}
-                        className="stat-card stat-card-clickable"
-                        style={{
-                            '--stat-color': stat.color,
-                            '--stat-bg': stat.bg,
-                        }}
-                        onClick={() => navigate(stat.link)}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={e => e.key === 'Enter' && navigate(stat.link)}
-                    >
-                        <span className="stat-icon">{stat.icon}</span>
-                        <div className="stat-info">
-                            <span className="stat-value">{stat.value}</span>
-                            <span className="stat-label">{stat.label}</span>
-                        </div>
-                    </div>
-                ))}
-            </div>
+            {stats.length > 0 && (
+                <div className="stats-row">
+                    {stats.map((stat) => (
+                        <Link
+                            key={stat.id}
+                            to={stat.link}
+                            className="stat-card stat-card-clickable"
+                            style={{
+                                '--stat-color': stat.color,
+                                '--stat-bg': stat.bg,
+                            }}
+                        >
+                            <span className="stat-icon">{stat.icon}</span>
+                            <div className="stat-info">
+                                {stat.metrics ? (
+                                    <div className="stat-metrics" aria-label={stat.label}>
+                                        {stat.metrics.map((metric) => (
+                                            <span className="stat-metric" key={metric.label}>
+                                                <strong>{metric.value}</strong>
+                                                <small>{metric.label}</small>
+                                            </span>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <span className="stat-value">{stat.value}</span>
+                                )}
+                                <span className="stat-label">{stat.label}</span>
+                            </div>
+                        </Link>
+                    ))}
+                </div>
+            )}
 
             {/* === QUICK ACTIONS === */}
             <div className="quick-actions">
@@ -184,47 +210,70 @@ export function DashboardPage() {
                     <button onClick={handleNewSchedule} className="quick-btn">
                         ✨ Nuevo Horario
                     </button>
-                    <Link to="/mis-horarios" className="quick-btn">
-                        📅 Mis Horarios
-                    </Link>
-                    <Link to="/mis-evaluaciones" className="quick-btn">
-                        ⭐ Mis Evaluaciones
-                    </Link>
+                    {canUseCloudSchedules && (
+                        <Link to="/mis-horarios" className="quick-btn">
+                            📅 Mis Horarios
+                        </Link>
+                    )}
+                    {canManageRatings && (
+                        <Link to="/mis-evaluaciones" className="quick-btn">
+                            ⭐ Mis Evaluaciones
+                        </Link>
+                    )}
                     <Link to="/profesores" className="quick-btn">
                         👨‍🏫 Profesores
                     </Link>
-                    <Link to="/mis-notificaciones" className="quick-btn">
-                        🔔 Notificaciones
+                    <Link to="/ajustes" className="quick-btn">
+                        ⚙️ Ajustes
                     </Link>
+                    {canUseNotifications && (
+                        <Link to="/mis-notificaciones" className="quick-btn">
+                            🔔 Monitoreo y alertas
+                        </Link>
+                    )}
                 </div>
             </div>
 
-            {/* === NOTIFICATION MANAGEMENT === */}
-            <section className="dashboard-section notif-manage-section">
+            {/* === NOTIFICATION AND MONITORING MANAGEMENT === */}
+            {canUseNotifications && (
+                <section className="dashboard-section notif-manage-section">
                 <div className="section-header clickable-header" onClick={() => navigate('/mis-notificaciones')}>
-                    <h2>🔔 Gestión de Notificaciones</h2>
+                    <h2>🔔 Monitoreo y alertas</h2>
                     <Link to="/mis-notificaciones" className="section-link" onClick={e => e.stopPropagation()}>
-                        Ir &rarr;
+                        Gestionar &rarr;
                     </Link>
                 </div>
                 <div className="notif-manage-body">
                     <div className="notif-manage-status">
                         <span className={`notif-permission-dot ${permission || 'default'}`}></span>
                         <div className="notif-manage-status-text">
-                            <strong>Permiso de notificaciones</strong>
+                            <strong>Notificaciones de este dispositivo</strong>
                             <span className="notif-manage-status-label">
-                                {permission === 'granted'
-                                    ? '✅ Notificaciones push activadas — recibirás alertas de cupos y cambios'
+                                {deviceRegistered
+                                    ? '✅ Permiso concedido y dispositivo registrado para recibir alertas'
                                     : permission === 'denied'
                                         ? '❌ Permiso denegado — cámbialo desde la configuración del navegador'
-                                        : '🔕 No activadas — actívalas para recibir alertas de cupos'}
+                                        : permission !== 'granted'
+                                            ? '🔕 Permiso pendiente — actívalo para registrar este dispositivo'
+                                            : deviceRegistrationStatus === 'registering'
+                                                ? '⏳ Permiso concedido; registrando el dispositivo…'
+                                                : `⚠️ Permiso concedido, pero el dispositivo no está registrado${deviceError ? `: ${deviceError}` : ''}`}
                             </span>
                         </div>
                     </div>
                     <div className="notif-manage-actions">
-                        {permission !== 'granted' && (
-                            <button onClick={requestPermission} className="notif-manage-btn" type="button">
-                                🔔 Activar notificaciones
+                        {!deviceRegistered && permission !== 'denied' && (
+                            <button
+                                onClick={requestPermission}
+                                className="notif-manage-btn"
+                                type="button"
+                                disabled={isRequestingPermission || deviceRegistrationStatus === 'registering'}
+                            >
+                                {isRequestingPermission || deviceRegistrationStatus === 'registering'
+                                    ? '⏳ Registrando…'
+                                    : permission === 'granted'
+                                        ? '🔄 Registrar dispositivo'
+                                        : '🔔 Activar notificaciones'}
                             </button>
                         )}
                         <Link to="/mis-notificaciones" className="notif-manage-btn secondary">
@@ -240,7 +289,7 @@ export function DashboardPage() {
                         </div>
                         <div className="notif-manage-monitored-list">
                             {monitoredCourses.slice(0, 4).map((mc) => (
-                                <div key={mc.nrc} className="notif-manage-monitored-item">
+                                <div key={`${mc.nrc}_${mc.ciclo || mc.ciclop || ''}`} className="notif-manage-monitored-item">
                                     <span className="monitor-status-dot"></span>
                                     <span className="notif-manage-monitored-name">{mc.materia || 'Sin nombre'}</span>
                                     <span className="monitor-nrc">NRC {mc.nrc}</span>
@@ -248,12 +297,12 @@ export function DashboardPage() {
                                         className="notif-manage-monitored-remove"
                                         onClick={async (e) => {
                                             e.stopPropagation();
-                                            try {
-                                                await stopMonitoring(mc.nrc, mc.horarioLabel);
-                                                const updated = await getMonitoredCourses(user.uid);
-                                                setMonitoredCourses(updated);
+                                            const stopped = await stopMonitor(mc.nrc, mc.ciclo || mc.ciclop);
+                                            if (stopped) {
                                                 showToast(`Monitoreo de ${mc.materia || mc.nrc} detenido`, 'info');
-                                            } catch { showToast('Error al detener monitoreo', 'error'); }
+                                            } else {
+                                                showToast('Error al detener monitoreo', 'error');
+                                            }
                                         }}
                                         title="Detener monitoreo"
                                         type="button"
@@ -276,11 +325,14 @@ export function DashboardPage() {
                         <Link to="/planear" className="notif-manage-btn secondary small">Ir al planificador</Link>
                     </div>
                 )}
-            </section>
+                </section>
+            )}
 
             {/* === MAIN CONTENT: TWO COLUMNS === */}
-            <div className="dashboard-main">
+            {(canUseCloudSchedules || canManageRatings) && (
+            <div className={`dashboard-main ${canUseCloudSchedules !== canManageRatings ? 'single-column' : ''}`}>
                 {/* === RECENT SCHEDULES === */}
+                {canUseCloudSchedules && (
                 <section className="dashboard-section">
                     <div className="section-header clickable-header" onClick={() => schedules.length > 0 && navigate('/mis-horarios')}>
                         <h2>📅 Horarios Recientes</h2>
@@ -328,8 +380,10 @@ export function DashboardPage() {
                         </div>
                     )}
                 </section>
+                )}
 
                 {/* === RECENT RATINGS === */}
+                {canManageRatings && (
                 <section className="dashboard-section">
                     <div className="section-header clickable-header" onClick={() => ratings.length > 0 && navigate('/mis-evaluaciones')}>
                         <h2>⭐ Evaluaciones Recientes</h2>
@@ -385,57 +439,9 @@ export function DashboardPage() {
                         </div>
                     )}
                 </section>
+                )}
             </div>
-
-            {/* === MONITORED COURSES === */}
-                <section className="dashboard-section monitored-section">
-                    <div className="section-header clickable-header" onClick={() => monitoredCourses.length > 0 && navigate('/mis-notificaciones')}>
-                        <h2>📡 Materias Monitoreadas</h2>
-                        {monitoredCourses.length > 0 && (
-                            <Link to="/mis-notificaciones" className="section-link" onClick={e => e.stopPropagation()}>
-                                Ver todas &rarr;
-                            </Link>
-                        )}
-                    </div>
-
-                    {monitoredCourses.length === 0 ? (
-                        <div className="section-empty">
-                            <span className="empty-icon">📡</span>
-                            <p>Aún no monitoreas ninguna materia</p>
-                            <Link to="/planear" className="empty-cta-link">
-                                Ir al planificador
-                            </Link>
-                        </div>
-                    ) : (
-                        <div className="section-list monitored-list">
-                            {recentMonitored.map((mc) => (
-                                <div
-                                    key={mc.id || mc.nrc}
-                                    className="list-item clickable"
-                                    onClick={() => navigate('/mis-notificaciones')}
-                                >
-                                    <div className="list-item-bar monitor-bar"></div>
-                                    <div className="list-item-content">
-                                        <div className="list-item-top">
-                                            <span className="list-item-name">{mc.materia || 'Sin nombre'}</span>
-                                            <span className="monitor-nrc">NRC {mc.nrc}</span>
-                                        </div>
-                                        <div className="list-item-meta">
-                                            {mc.profesor && (
-                                                <span className="list-item-tag">{mc.profesor}</span>
-                                            )}
-                                            {mc.horarioLabel && (
-                                                <span className="list-item-tag">{mc.horarioLabel}</span>
-                                            )}
-                                            <span className="monitor-status-dot"></span>
-                                            <span className="monitor-status-text">Monitoreando</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </section>
+            )}
         </div>
     );
 }

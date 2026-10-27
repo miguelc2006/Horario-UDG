@@ -41,7 +41,9 @@ function loadFormPrefs() {
             const p = JSON.parse(raw);
             if (p && p.centro) return p;
         }
-    } catch {}
+    } catch {
+        return null;
+    }
     return null;
 }
 
@@ -272,7 +274,9 @@ export function ConsultaForm({ onConsultar, loading, initialParams = {} }) {
                 carrera: params.carrera,
                 savedAt: new Date().toISOString()
             }));
-        } catch {}
+        } catch {
+            // localStorage puede no estar disponible; la consulta puede continuar.
+        }
         // Encontrar etiqueta bonita para mostrar en el historial
         const calendarioSeleccionado = allCalendarios.find(c => c.value === params.calendario);
         let labelBonito = params.calendario;
@@ -357,7 +361,7 @@ export function ConsultaForm({ onConsultar, loading, initialParams = {} }) {
                 
                 {mostrarSugerencias && carrerasFiltradas.length > 0 && (
                     <ul className="suggestions-list animate-fade-in" role="listbox" aria-label="Carreras sugeridas">
-                        {carrerasFiltradas.map((carrera, index) => (
+                        {carrerasFiltradas.map((carrera) => (
                             <li 
                                 key={carrera.id} 
                                 role="option"

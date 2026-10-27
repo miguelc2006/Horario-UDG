@@ -138,14 +138,8 @@
    ============================================================ */
 .stats-row {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 1rem;
-}
-
-@media (max-width: 900px) {
-    .stats-row {
-        grid-template-columns: repeat(2, 1fr);
-    }
 }
 
 .stat-card {
@@ -177,6 +171,8 @@
 }
 .stat-card-clickable {
     cursor: pointer;
+    color: inherit;
+    text-decoration: none;
 }
 .stat-card-clickable:active {
     transform: scale(0.97);
@@ -215,6 +211,30 @@
     color: var(--text-secondary-color);
     font-weight: 500;
 }
+.stat-metrics {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+}
+.stat-metric {
+    display: flex;
+    align-items: baseline;
+    gap: 0.25rem;
+    white-space: nowrap;
+}
+.stat-metric + .stat-metric {
+    padding-left: 0.9rem;
+    border-left: 1px solid var(--border-color);
+}
+.stat-metric strong {
+    font-size: 1.35rem;
+    line-height: 1;
+    color: var(--text-color);
+}
+.stat-metric small {
+    font-size: 0.7rem;
+    color: var(--text-secondary-color);
+}
 
 /* ============================================================
    MAIN TWO-COLUMN CONTENT
@@ -224,6 +244,9 @@
     grid-template-columns: 1fr 1fr;
     gap: 1.5rem;
     align-items: start;
+}
+.dashboard-main.single-column {
+    grid-template-columns: 1fr;
 }
 
 /* --- SECTION CARD --- */
@@ -337,26 +360,6 @@
 .list-item-bar.rating-bar {
     background: var(--gold-color);
 }
-.list-item-bar.monitor-bar {
-    background: var(--success-color);
-}
-
-/* --- MONITORED COURSES --- */
-.monitored-section {
-    grid-column: 1 / -1;
-}
-
-.monitored-list {
-    padding: 0.5rem;
-}
-
-@media (min-width: 768px) {
-    .monitored-list {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 0.25rem;
-    }
-}
 
 .monitor-nrc {
     font-size: 0.78rem;
@@ -383,12 +386,6 @@
 @keyframes monitor-pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.4; }
-}
-
-.monitor-status-text {
-    font-size: 0.72rem;
-    color: var(--success-color);
-    font-weight: 600;
 }
 
 .list-item-content {

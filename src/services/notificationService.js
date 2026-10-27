@@ -5,114 +5,169 @@
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
 import { getApp } from "firebase/app";
 import { auth, getDb } from "../firebase/config";
+import {
+    canUseNotifications,
+    requireNotificationsAccess,
+} from "../utils/authGuard";
 
 let _messaging = null;
-let _unsubscribeOnMessage = null;
-let _fcmInitialized = false;
+let _serviceWorkerRegistration = null;
+let _fcmInitPromise = null;
 
 /**
- * Inicializa FCM: crea instancia de messaging y configura el Service Worker.
+ * Comprueba si el navegador dispone de las API necesarias para FCM web.
+ * @returns {boolean} `true` cuando Notification y Service Worker están disponibles.
  */
-export async function initFCM() {
-    if (_fcmInitialized) return true;
-
-    try {
-        const app = getApp();
-        _messaging = getMessaging(app);
-
-        // Registrar SW personalizado para notificaciones background
-        try {
-            const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
-            await navigator.serviceWorker.ready;
-        } catch (swError) {
-            console.warn('[FCM] SW no disponible — solo foreground:', swError.message);
-        }
-
-        _fcmInitialized = true;
-        return true;
-    } catch (error) {
-        console.warn('[FCM] Error init:', error.message);
-        return false;
-    }
+export function isNotificationSupported() {
+    return typeof window !== 'undefined'
+        && 'Notification' in window
+        && 'serviceWorker' in navigator;
 }
 
 /**
- * Solicita permiso y obtiene token FCM.
+ * Devuelve el permiso real del navegador para el origen actual.
+ * `null` significa que el navegador no soporta notificaciones web.
+ *
+ * @returns {NotificationPermission|null}
+ */
+export function getBrowserNotificationPermission() {
+    return isNotificationSupported() ? Notification.permission : null;
+}
+
+/**
+ * Inicializa Firebase Messaging y registra el Service Worker compartido.
+ * La promesa se reutiliza para evitar registros duplicados en React StrictMode.
+ *
+ * @returns {Promise<boolean>} Si FCM quedó disponible para obtener tokens.
+ */
+export async function initFCM() {
+    if (_messaging && _serviceWorkerRegistration) return true;
+    if (_fcmInitPromise) return _fcmInitPromise;
+
+    if (!isNotificationSupported()) return false;
+
+    _fcmInitPromise = (async () => {
+        try {
+            const app = getApp();
+            _messaging = getMessaging(app);
+            _serviceWorkerRegistration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+            await navigator.serviceWorker.ready;
+            return true;
+        } catch (error) {
+            _messaging = null;
+            _serviceWorkerRegistration = null;
+            console.warn('[FCM] No se pudo inicializar:', error.message);
+            return false;
+        } finally {
+            _fcmInitPromise = null;
+        }
+    })();
+
+    return _fcmInitPromise;
+}
+
+/**
+ * Solicita al usuario permiso de notificaciones. Debe invocarse desde un gesto
+ * explícito (por ejemplo, el clic en "Activar").
+ *
+ * @returns {Promise<NotificationPermission|null>} Permiso real tras responder.
+ */
+export async function requestNotificationPermission() {
+    if (!isNotificationSupported()) return null;
+    if (Notification.permission !== 'default') return Notification.permission;
+    return Notification.requestPermission();
+}
+
+/**
+ * Recupera el token FCM vigente sin solicitar permisos. Permite rehidratar el
+ * dispositivo en cada carga cuando el navegador ya conserva `granted`.
+ *
+ * @returns {Promise<string|null>} Token del dispositivo o `null` sin permiso.
+ * @throws {Error} Si FCM no puede inicializarse u obtener el token.
+ */
+export async function getCurrentFCMToken() {
+    if (getBrowserNotificationPermission() !== 'granted') return null;
+
+    const initialized = await initFCM();
+    if (!initialized || !_messaging || !_serviceWorkerRegistration) {
+        throw new Error('Firebase Messaging no está disponible en este navegador.');
+    }
+
+    const currentToken = await getToken(_messaging, {
+        vapidKey: import.meta.env.VITE_FIREBASE_VAPID_KEY,
+        serviceWorkerRegistration: _serviceWorkerRegistration,
+    });
+
+    if (!currentToken) {
+        throw new Error('Firebase no devolvió un token para este dispositivo.');
+    }
+
+    return currentToken;
+}
+
+/**
+ * Solicita permiso explícitamente y obtiene el token FCM cuando fue concedido.
+ * Se conserva como fachada compatible para consumidores externos.
+ *
  * @returns {Promise<string|null>}
  */
 export async function requestFCMPermission() {
-    if (!_messaging) {
-        const ok = await initFCM();
-        if (!ok) return null;
-    }
-
-    try {
-        const swRegistration = await navigator.serviceWorker.ready;
-        const currentToken = await getToken(_messaging, {
-            vapidKey: import.meta.env.VITE_FIREBASE_VAPID_KEY,
-            serviceWorkerRegistration: swRegistration,
-        });
-        return currentToken || null;
-    } catch (error) {
-        if (error.code === 'messaging/permission-blocked') {
-            console.warn('[FCM] Permiso denegado permanentemente');
-        }
-        return null;
-    }
+    const permission = await requestNotificationPermission();
+    return permission === 'granted' ? getCurrentFCMToken() : null;
 }
 
 /**
- * Registra token FCM en backend serverless.
- * @param {string} token
- * @returns {Promise<boolean>}
+ * Registra o renueva un token FCM en el backend del usuario autenticado.
+ *
+ * @param {string} token Token FCM no vacío del dispositivo actual.
+ * @returns {Promise<object>} Respuesta confirmada por el endpoint.
+ * @throws {Error} Si el backend rechaza o no puede registrar el token.
  */
 export async function registerFCMToken(token) {
-    try {
-        const user = auth.currentUser;
-        if (!user) return false;
+    if (!token) throw new Error('Token FCM requerido para registrar el dispositivo.');
 
-        const idToken = await user.getIdToken();
-        const res = await fetch('/api/fcm-register', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${idToken}`,
-            },
-            body: JSON.stringify({
-                token,
-                userAgent: navigator.userAgent,
-            }),
-        });
+    const user = auth.currentUser;
+    requireNotificationsAccess(user);
 
-        return res.ok;
-    } catch (error) {
-        console.error('[FCM] Error registrando token:', error.message);
-        return false;
+    const idToken = await user.getIdToken();
+    const res = await fetch('/api/fcm-register', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+            token,
+            userAgent: navigator.userAgent,
+        }),
+    });
+    const payload = await res.json().catch(() => ({}));
+
+    if (!res.ok || payload.registered !== true) {
+        throw new Error(payload.error || 'El backend no confirmó el registro del dispositivo.');
     }
+
+    return payload;
 }
 
 /**
- * Escucha mensajes en foreground.
+ * Escucha mensajes recibidos mientras la aplicación está visible.
+ * Cada consumidor obtiene una suscripción independiente; su limpieza no afecta
+ * otras instancias.
+ *
  * @param {(msg: {title:string,body:string,data:object}) => void} callback
- * @returns {() => void} cleanup
+ * @returns {() => void} Función de cancelación de la suscripción.
  */
 export function onForegroundMessage(callback) {
     if (!_messaging) return () => {};
 
-    if (_unsubscribeOnMessage) _unsubscribeOnMessage();
-
-    _unsubscribeOnMessage = onMessage(_messaging, (payload) => {
+    return onMessage(_messaging, (payload) => {
         callback?.({
             title: payload.notification?.title || '',
             body: payload.notification?.body || '',
             data: payload.data || {},
         });
     });
-
-    return () => {
-        _unsubscribeOnMessage?.();
-        _unsubscribeOnMessage = null;
-    };
 }
 
 /**
@@ -120,7 +175,11 @@ export function onForegroundMessage(callback) {
  */
 export async function startMonitoring(nrcData) {
     const user = auth.currentUser;
-    if (!user) throw new Error('Debes iniciar sesión');
+    requireNotificationsAccess(user);
+
+    if (!nrcData?.nrc || !nrcData?.ciclo) {
+        throw new Error('El NRC y el ciclo son obligatorios para activar el monitoreo');
+    }
 
     const idToken = await user.getIdToken();
     const res = await fetch('/api/toggle-monitor', {
@@ -142,9 +201,13 @@ export async function startMonitoring(nrcData) {
 /**
  * Desactiva monitoreo de un NRC.
  */
-export async function stopMonitoring(nrc, horarioLabel) {
+export async function stopMonitoring(nrc, ciclo) {
     const user = auth.currentUser;
-    if (!user) throw new Error('Debes iniciar sesión');
+    requireNotificationsAccess(user);
+
+    if (!nrc || !ciclo) {
+        throw new Error('El NRC y el ciclo son obligatorios para desactivar el monitoreo');
+    }
 
     const idToken = await user.getIdToken();
     const res = await fetch('/api/toggle-monitor', {
@@ -153,7 +216,7 @@ export async function stopMonitoring(nrc, horarioLabel) {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${idToken}`,
         },
-        body: JSON.stringify({ nrc, horarioLabel }),
+        body: JSON.stringify({ nrc, ciclo }),
     });
 
     if (!res.ok) {
@@ -167,33 +230,29 @@ export async function stopMonitoring(nrc, horarioLabel) {
  * Obtiene materias monitoreadas del usuario.
  */
 export async function getMonitoredCourses(userId) {
-    try {
-        const db = await getDb();
-        const { collection, getDocs } = await import("firebase/firestore");
-        const snapshot = await getDocs(collection(db, "users", userId, "monitored-courses"));
-        return snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-    } catch {
-        return [];
-    }
+    if (!auth.currentUser || !canUseNotifications(auth.currentUser.email)) return [];
+
+    const db = await getDb();
+    const { collection, getDocs } = await import("firebase/firestore");
+    const snapshot = await getDocs(collection(db, "users", userId, "monitored-courses"));
+    return snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 
 /**
  * Obtiene notificaciones del usuario.
  */
 export async function getUserNotifications(userId, max = 20) {
-    try {
-        const db = await getDb();
-        const { collection, query, orderBy, limit, getDocs } = await import("firebase/firestore");
-        const q = query(
-            collection(db, "users", userId, "notifications"),
-            orderBy("createdAt", "desc"),
-            limit(max)
-        );
-        const snapshot = await getDocs(q);
-        return snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-    } catch {
-        return [];
-    }
+    if (!auth.currentUser || !canUseNotifications(auth.currentUser.email)) return [];
+
+    const db = await getDb();
+    const { collection, query, orderBy, limit, getDocs } = await import("firebase/firestore");
+    const q = query(
+        collection(db, "users", userId, "notifications"),
+        orderBy("createdAt", "desc"),
+        limit(max)
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 
 /**
@@ -201,6 +260,7 @@ export async function getUserNotifications(userId, max = 20) {
  */
 export async function markNotificationRead(userId, notifId) {
     try {
+        requireNotificationsAccess(auth.currentUser);
         const db = await getDb();
         const { doc, updateDoc } = await import("firebase/firestore");
         await updateDoc(doc(db, "users", userId, "notifications", notifId), { read: true });
@@ -216,6 +276,7 @@ export async function markNotificationRead(userId, notifId) {
  */
 export async function saveNotificationPref(userId, prefs) {
     try {
+        requireNotificationsAccess(auth.currentUser);
         const db = await getDb();
         const { doc, setDoc } = await import("firebase/firestore");
         const ref = doc(db, "users", userId, "notificationPrefs", "preferences");
@@ -233,6 +294,8 @@ export async function saveNotificationPref(userId, prefs) {
  * @returns {Promise<object>}
  */
 export async function getNotificationPrefs(userId) {
+    if (!auth.currentUser || !canUseNotifications(auth.currentUser.email)) return {};
+
     try {
         const db = await getDb();
         const { doc, getDoc } = await import("firebase/firestore");
@@ -251,6 +314,7 @@ export async function getNotificationPrefs(userId) {
  */
 export async function deleteNotification(userId, notifId) {
     try {
+        requireNotificationsAccess(auth.currentUser);
         const db = await getDb();
         const { doc, deleteDoc } = await import("firebase/firestore");
         await deleteDoc(doc(db, "users", userId, "notifications", notifId));
@@ -265,6 +329,7 @@ export async function deleteNotification(userId, notifId) {
  */
 export async function deleteAllNotifications(userId) {
     try {
+        requireNotificationsAccess(auth.currentUser);
         const db = await getDb();
         const { collection, getDocs, writeBatch } = await import("firebase/firestore");
         const snapshot = await getDocs(collection(db, "users", userId, "notifications"));
@@ -278,7 +343,11 @@ export async function deleteAllNotifications(userId) {
 }
 
 export default {
+    isNotificationSupported,
+    getBrowserNotificationPermission,
     initFCM,
+    requestNotificationPermission,
+    getCurrentFCMToken,
     requestFCMPermission,
     registerFCMToken,
     onForegroundMessage,
