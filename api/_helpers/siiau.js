@@ -1,6 +1,6 @@
 // api/_helpers/siiau.js
 // Helper compartido para consultar SIIAU — reusa lógica de consultar-oferta.js
-import axios from 'axios';
+import { httpClient } from './httpClient.js';
 import { load } from 'cheerio';
 import iconv from 'iconv-lite';
 
@@ -42,7 +42,7 @@ export async function consultarNrc(nrc, ciclop, cup, majrp) {
             materiap: "", horaip: "", horafp: "", edifp: "", aulap: "", ordenp: "0"
         });
 
-        const response = await axios.post(POST_URL, postData.toString(), {
+        const response = await httpClient.post(POST_URL, postData.toString(), {
             headers, timeout: 20000, responseType: 'arraybuffer'
         });
 

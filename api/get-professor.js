@@ -1,5 +1,4 @@
-// api/get-professor.js
-import axios from 'axios';
+import { httpClient } from './_helpers/httpClient.js';
 import { load } from 'cheerio';
 
 const BASE_URL = "https://www.misprofesores.com";
@@ -282,7 +281,7 @@ const makeRequestWithRetry = async (url, options = {}, retries = MAX_RETRIES) =>
         try {
             console.log(`[Scraper] Intento ${attempt}/${retries} para: ${url}`);
             
-            const response = await axios.get(url, {
+            const response = await httpClient.get(url, {
                 ...options,
                 timeout: REQUEST_TIMEOUT,
                 headers: { ...HTTP_HEADERS, ...options.headers },

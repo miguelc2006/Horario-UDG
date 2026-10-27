@@ -1,4 +1,4 @@
-import axios from 'axios';
+import { httpClient } from './_helpers/httpClient.js';
 import { load } from 'cheerio';
 import iconv from 'iconv-lite';
 
@@ -22,7 +22,7 @@ export default async function handler(req, res) {
 
     let response;
     try {
-        response = await axios.get(MAJORS_URL, { 
+        response = await httpClient.get(MAJORS_URL, { 
             headers, 
             timeout: 10000,
             responseType: 'arraybuffer'

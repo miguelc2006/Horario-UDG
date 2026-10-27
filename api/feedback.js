@@ -1,5 +1,5 @@
 // api/feedback.js
-import axios from 'axios';
+import { httpClient } from './_helpers/httpClient.js';
 
 // ID del Google Form (configurado en Vercel Environment Variables)
 // En Vercel: VITE_GOOGLE_FORM_ID
@@ -42,7 +42,7 @@ export default async function handler(req, res) {
 
         const googleFormUrl = `https://docs.google.com/forms/d/e/${GOOGLE_FORM_ID}/formResponse`;
         
-        const response = await axios.post(googleFormUrl, params.toString(), {
+        const response = await httpClient.post(googleFormUrl, params.toString(), {
             headers: { 
                 'Content-Type': 'application/x-www-form-urlencoded'
             },

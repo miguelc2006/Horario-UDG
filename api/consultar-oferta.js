@@ -1,5 +1,5 @@
 // api/consultar-oferta.js
-import axios from 'axios';
+import { httpClient } from './_helpers/httpClient.js';
 import { load } from 'cheerio';
 import iconv from 'iconv-lite';
 import admin from 'firebase-admin';
@@ -100,7 +100,7 @@ export default async function handler(req, res) {
             horaip: "", horafp: "", edifp: "", aulap: "", ordenp: "0"
         });
 
-        const response = await axios.post(POST_URL, postData.toString(), {
+        const response = await httpClient.post(POST_URL, postData.toString(), {
             headers, timeout: 20000, responseType: 'arraybuffer'
         });
 
